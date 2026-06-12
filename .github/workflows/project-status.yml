@@ -38,6 +38,11 @@ jobs:
       || (github.event_name == 'pull_request' && github.event.action != 'closed')
     runs-on: ubuntu-latest
     steps:
+      # TEST-ONLY PATCH (workflow-template#67/#78): the canonical pack omits
+      # checkout, so the board step's `bash .github/scripts/...` cannot find
+      # the sidecar on the runner. Checkout only reads the repo tree.
+      - uses: actions/checkout@v4
+
       - name: Resolve PR and issue
         id: resolve
         env:
@@ -87,6 +92,9 @@ jobs:
     if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
+      # TEST-ONLY PATCH (workflow-template#67/#78): see on-pr-open.
+      - uses: actions/checkout@v4
+
       - name: Resolve issue
         id: resolve
         env:
