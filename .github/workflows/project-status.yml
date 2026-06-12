@@ -71,7 +71,9 @@ jobs:
       - name: Update Project v2 board (opt-in)
         if: steps.resolve.outputs.issue != '' && vars.PROJECT_NUMBER != ''
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # PAT with project scope: the default GITHUB_TOKEN cannot access a
+          # user-owned Project v2 board. See PROJECTS_TOKEN repo secret.
+          GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
           OWNER:   ${{ github.repository_owner }}
           NUMBER:  ${{ vars.PROJECT_NUMBER }}
           ISSUE:   ${{ steps.resolve.outputs.issue }}
@@ -110,7 +112,9 @@ jobs:
       - name: Update Project v2 board (opt-in)
         if: steps.resolve.outputs.issue != '' && vars.PROJECT_NUMBER != ''
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # PAT with project scope: the default GITHUB_TOKEN cannot access a
+          # user-owned Project v2 board. See PROJECTS_TOKEN repo secret.
+          GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
           OWNER:   ${{ github.repository_owner }}
           NUMBER:  ${{ vars.PROJECT_NUMBER }}
           ISSUE:   ${{ steps.resolve.outputs.issue }}
