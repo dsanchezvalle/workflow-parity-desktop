@@ -1,0 +1,202 @@
+# CORE: agnostic
+# Append to CHANGELOG.md when conventional commits land on develop.
+# Each commit is grouped under its own commit date (%cs), not the date
+# of the workflow run. This keeps the changelog accurate for:
+#   - brownfield first-runs (history dated by real commit date, not collapsed under "today")
+#   - late re-runs after a failed/blocked workflow
+#   - any case where commits and workflow-run dates differ
+# Skips its own commits via [skip ci] in the subject and via an explicit
+# match on `chore(changelog): update`. Opt-out per commit via
+# [skip changelog] in the subject.
+name: Generate Changelog
+
+on:
+  push:
+    branches: [develop]
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine cut-off (newest date already in CHANGELOG)
+        id: cut
+        run: |
+          set -euo pipefail
+          LAST_DATE=""
+          if [ -f CHANGELOG.md ]; then
+            LAST_DATE=$(grep -m1 -E '^## [0-9]{4}-[0-9]{2}-[0-9]{2}' CHANGELOG.md | awk '{print $2}' || true)
+          fi
+          echo "last_date=${LAST_DATE}" >> "$GITHUB_OUTPUT"
+
+      - name: Collect new commits since cut-off
+        id: collect
+        env:
+          LAST: ${{ steps.cut.outputs.last_date }}
+        run: |
+          set -euo pipefail
+
+          # Range: from LAST through HEAD. If no LAST, full history.
+          if [ -n "$LAST" ]; then
+            RANGE_ARGS=("--since=$LAST")
+          else
+            RANGE_ARGS=()
+          fi
+
+          # Each line: COMMITDATE|SUBJECT (e.g. "2026-05-04|feat: add foo").
+          # Filters (in order):
+          #   - drop back-merges
+          #   - drop [skip changelog] opt-out
+          #   - drop [skip ci] (workflow's own bot commits and any other
+          #     manually skipped commits)
+          #   - drop the workflow's own changelog-update commits explicitly
+          #     (defense in depth — [skip ci] should already cover them,
+          #     but matching the literal subject keeps it correct even if
+          #     someone strips [skip ci] in a future iteration)
+          #   - keep only conventional-commit subjects
+          COMMITS=$(git log "${RANGE_ARGS[@]}" --no-merges --pretty=format:'%cs|%s' \
+            | grep -Ev '\|back-merge:' \
+            | grep -Ev '\[skip changelog\]' \
+            | grep -Ev '\[skip ci\]' \
+            | grep -Ev '\|chore\(changelog\): update' \
+            | grep -E '\|(feat|fix|docs|refactor|chore|test|perf|build|ci|style|revert)(\([^)]+\))?!?: ' || true)
+
+          if [ -z "$COMMITS" ]; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "has_changes=true" >> "$GITHUB_OUTPUT"
+
+          {
+            echo 'entries<<__ENTRIES_EOF__'
+            echo "$COMMITS"
+            echo '__ENTRIES_EOF__'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Write CHANGELOG.md
+        if: steps.collect.outputs.has_changes == 'true'
+        env:
+          ENTRIES: ${{ steps.collect.outputs.entries }}
+        run: |
+          set -euo pipefail
+          touch CHANGELOG.md
+          python3 - <<PY
+          import re, os, pathlib, collections
+
+          path = pathlib.Path("CHANGELOG.md")
+          text = path.read_text() if path.exists() else ""
+
+          # Parse new entries from env: each line is "DATE|SUBJECT".
+          # Group by commit date; prefix each subject with "- " for markdown.
+          new_by_date = collections.defaultdict(list)
+          for line in os.environ.get("ENTRIES", "").splitlines():
+              if "|" not in line:
+                  continue
+              date, subject = line.split("|", 1)
+              date = date.strip()
+              subject = subject.strip()
+              if not date or not subject:
+                  continue
+              new_by_date[date].append(f"- {subject}")
+
+          # Parse existing CHANGELOG into preamble + dated blocks.
+          # Preamble = everything before the first "## YYYY-MM-DD" heading
+          # (typically "# Changelog\n\nDescription...").
+          HEADING_RE = re.compile(r'^## (\d{4}-\d{2}-\d{2})\s*$')
+          lines = text.splitlines()
+          preamble = []
+          blocks = []  # list of [date, [entry_lines]]
+
+          i = 0
+          while i < len(lines) and not HEADING_RE.match(lines[i]):
+              preamble.append(lines[i])
+              i += 1
+          while preamble and preamble[-1].strip() == "":
+              preamble.pop()
+
+          while i < len(lines):
+              m = HEADING_RE.match(lines[i])
+              if not m:
+                  i += 1
+                  continue
+              date = m.group(1)
+              i += 1
+              while i < len(lines) and lines[i].strip() == "":
+                  i += 1
+              entries = []
+              while i < len(lines) and lines[i].startswith("- "):
+                  entries.append(lines[i])
+                  i += 1
+              blocks.append([date, entries])
+
+          # Merge new entries into existing blocks (dedup) or add new blocks.
+          # Dedup applies in both branches: when merging into an existing
+          # block AND when creating a new block. Without intra-block dedup,
+          # two commits with identical subjects on the same day produce
+          # two identical bullets in the brand-new-date case.
+          by_date = {b[0]: b for b in blocks}
+          for date, entries in new_by_date.items():
+              if date in by_date:
+                  block = by_date[date]
+                  seen = set(block[1])
+                  for e in entries:
+                      if e not in seen:
+                          block[1].append(e)
+                          seen.add(e)
+              else:
+                  seen = set()
+                  deduped = []
+                  for e in entries:
+                      if e not in seen:
+                          deduped.append(e)
+                          seen.add(e)
+                  new_block = [date, deduped]
+                  blocks.append(new_block)
+                  by_date[date] = new_block
+
+          # Sort entries within each block: feat, fix, then everything else,
+          # alphabetical within each bucket.
+          def bucket(line):
+              body = line[2:]
+              if body.startswith("feat"): return 0
+              if body.startswith("fix"):  return 1
+              return 2
+          for block in blocks:
+              block[1].sort(key=lambda ln: (bucket(ln), ln.lower()))
+
+          # Sort blocks by date descending (newest first).
+          blocks.sort(key=lambda b: b[0], reverse=True)
+
+          # Reassemble.
+          out = list(preamble)
+          if out:
+              out.append("")
+          for date, entries in blocks:
+              out.append(f"## {date}")
+              out.append("")
+              out.extend(entries)
+              out.append("")
+          while len(out) > 1 and out[-1] == "" and out[-2] == "":
+              out.pop()
+
+          path.write_text("\n".join(out) + "\n")
+          PY
+
+      - name: Commit
+        if: steps.collect.outputs.has_changes == 'true'
+        run: |
+          set -euo pipefail
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add CHANGELOG.md
+          git diff --cached --quiet && exit 0
+          git commit -m 'chore(changelog): update [skip ci]'
+          git push

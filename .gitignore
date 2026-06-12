@@ -1,1 +1,8 @@
 node_modules/
+
+# Workflow-template setup scratch space
+.workflow-staging/
+
+# Workflow-template install metadata (machine-specific)
+.workflow/
+.DS_Store

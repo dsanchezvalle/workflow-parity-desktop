@@ -1,0 +1,94 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+
+      "Bash(git status)",
+      "Bash(git status:*)",
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "Bash(git show:*)",
+      "Bash(git fetch:*)",
+      "Bash(git branch:*)",
+
+      "Bash(git checkout develop)",
+      "Bash(git checkout -b *:*)",
+      "Bash(git switch:*)",
+      "Bash(git rebase origin/develop)",
+      "Bash(git pull origin develop)",
+      "Bash(git stash:*)",
+      "Bash(git commit:*)",
+
+      "Bash(git push origin feat/**:*)",
+      "Bash(git push origin fix/**:*)",
+      "Bash(git push origin docs/**:*)",
+      "Bash(git push origin refactor/**:*)",
+      "Bash(git push origin chore/**:*)",
+      "Bash(git push origin test/**:*)",
+
+      "Bash(git push -u origin feat/**:*)",
+      "Bash(git push -u origin fix/**:*)",
+      "Bash(git push -u origin docs/**:*)",
+      "Bash(git push -u origin refactor/**:*)",
+      "Bash(git push -u origin chore/**:*)",
+      "Bash(git push -u origin test/**:*)",
+
+      "Bash(git add src/**)",
+
+      "Bash(gh issue view:*)",
+      "Bash(gh issue list:*)",
+      "Bash(gh issue comment:*)",
+      "Bash(gh issue edit:*)",
+
+      "Bash(gh pr view:*)",
+      "Bash(gh pr list:*)",
+      "Bash(gh pr diff:*)",
+      "Bash(gh pr checks:*)",
+      "Bash(gh pr comment:*)",
+      "Bash(gh pr edit:*)",
+      "Bash(gh pr create:*)",
+
+      "Bash(gh repo view:*)",
+      "Bash(gh api:*)",
+
+      "Bash(npm ci:*)",
+      "Bash(npm run lint:*)",
+      "Bash(npm run typecheck:*)",
+      "Bash(npm run build:*)",
+      "Bash(npm test:*)",
+      "Bash(npm run dev:*)",
+
+      "Edit(src/**)",
+      "Write(src/**)"
+    ],
+    "deny": [
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git push --force-with-lease:*)",
+      "Bash(git push origin main:*)",
+      "Bash(git push origin master:*)",
+      "Bash(git push origin develop:*)",
+      "Bash(git push origin HEAD:main:*)",
+      "Bash(git push origin HEAD:master:*)",
+      "Bash(git push origin HEAD:develop:*)",
+
+      "Bash(git reset --hard:*)",
+      "Bash(git restore --source:*)",
+      "Bash(git checkout -- :*)",
+
+      "Bash(git branch -D:*)",
+      "Bash(git branch -d:*)",
+      "Bash(git branch -m:*)",
+
+      "Bash(git rebase -i:*)",
+      "Bash(git add -i:*)",
+
+      "Bash(* --no-verify:*)",
+      "Bash(* --no-gpg-sign:*)",
+      "Bash(* -c commit.gpgsign=false:*)",
+
+      "Bash(rm -rf:*)"
+    ]
+  },
+  "hooks": {}
+}
