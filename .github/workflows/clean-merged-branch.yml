@@ -1,0 +1,32 @@
+# CORE: agnostic
+# Fallback branch cleanup. GitHub auto-delete-on-merge usually handles this;
+# this workflow is a belt-and-braces in case the setting is off.
+name: Clean Merged Branch
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [develop]
+
+permissions:
+  contents: write
+
+jobs:
+  delete:
+    if: >
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete merged head branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          # Refuse to delete protected branches under any circumstance.
+          case "$BRANCH" in
+            main|develop|master|release/*) echo "protected; skipping"; exit 0 ;;
+          esac
+          gh api -X DELETE "repos/${{ github.repository }}/git/refs/heads/$BRANCH" \
+            || echo "branch already deleted or never existed"

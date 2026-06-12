@@ -1,0 +1,37 @@
+# CORE: agnostic
+# Reject release PRs (develop -> main) whose title or body contains GitHub
+# closing keywords (closes/fixes/resolves #N). Issues are closed when their
+# feature PR merges to develop, not when develop merges to main; closing
+# keywords on the release PR would close them again or close unrelated ones.
+name: Validate Release PR
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  validate:
+    if: github.event.pull_request.head.ref == 'develop'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reject closing keywords
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+          BODY:  ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          PATTERN='(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]+#[0-9]+'
+          fail=0
+          if echo "$TITLE" | grep -Eiq "$PATTERN"; then
+            echo "::error::Release PR title must not contain closing keywords (closes/fixes/resolves #N)."
+            fail=1
+          fi
+          if echo "$BODY" | grep -Eiq "$PATTERN"; then
+            echo "::error::Release PR body must not contain closing keywords (closes/fixes/resolves #N)."
+            fail=1
+          fi
+          exit $fail

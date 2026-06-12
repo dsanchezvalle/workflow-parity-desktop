@@ -1,0 +1,29 @@
+# CORE: agnostic
+# Auto-applies `status: backlog` when an issue is opened. Mirrors the
+# Project v2 "Item added → Status: Backlog" built-in workflow, for
+# repos in labels-only mode (no Project v2 board configured).
+#
+# Repos using Project v2 still benefit: this workflow keeps the label
+# in sync with the board, so analyze / start / project-status.yml can
+# rely on `status: <stage>` labels regardless of mode.
+name: Issue Status Default
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Apply status label
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: |
+          gh issue edit "$ISSUE" \
+            --add-label "status: backlog" \
+            --repo "$GITHUB_REPOSITORY"

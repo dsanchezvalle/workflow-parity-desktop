@@ -1,0 +1,39 @@
+# CORE: agnostic
+# After a release lands on main, fast-forward (or merge-commit) main back into
+# develop so develop never lags. Subject prefix is `back-merge:` so the
+# generate-changelog workflow can ignore it.
+name: Back-merge
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  back-merge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: develop
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+
+      - name: Merge main into develop
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          if git merge --ff-only origin/main; then
+            echo "fast-forwarded develop"
+          else
+            git merge --no-ff -m "back-merge: main into develop [skip ci]" origin/main
+          fi
+          git push origin develop
