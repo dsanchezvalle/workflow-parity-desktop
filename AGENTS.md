@@ -130,6 +130,13 @@ documented (the check greps `AGENTS.md` for every `*.yml` basename).
   the `project` scope): the default `GITHUB_TOKEN` cannot access a
   user-owned Project v2 board, so the label steps keep `GITHUB_TOKEN`
   while the board steps use the PAT.
+  **Test-only parity patch** (workflow-template#67/#78, not part of the
+  canonical pack): both jobs add a `checkout` step (the canonical pack
+  omits it, so the board steps cannot find the sidecar on the runner),
+  and `project-status-set.sh` resolves the owner via the polymorphic
+  `repositoryOwner` query plus a `gh auth token` fallback (the canonical
+  combined user+org query errors on user-owned accounts). Audit verdicts
+  for this repo record the as-shipped behavior as FAIL.
 - `issue-status-default` — applies `status: backlog` to newly opened
   issues so every issue starts from a known state.
 - `generate-changelog` — appends a date-grouped entry to `CHANGELOG.md`

@@ -2,8 +2,21 @@
 # CORE: agnostic
 # Sets the Status field of a Project v2 item that links to the given issue.
 #
+# TEST-ONLY PATCH (twin-repo parity test — workflow-template#67 / #78).
+# This file diverges from the canonical pack in three ways so the desktop
+# board can sync on a user-owned account:
+#   1. GH_TOKEN falls back to `gh auth token` when not exported
+#      (canonical: hard-required env var, so session-side skill calls fail).
+#   2. Project meta resolves via the polymorphic repositoryOwner(login:)
+#      root (canonical: combined top-level user(...) + organization(...)
+#      query, which errors with NOT_FOUND on user accounts and aborts).
+#   3. Item pagination omits `after` on the first page (canonical seeds the
+#      literal string "null" as the cursor, which GraphQL rejects).
+# The canonical pack stays unpatched on purpose; audit verdicts for this
+# repo record the as-shipped behavior as FAIL. See workflow-template#78.
+#
 # Required env vars:
-#   GH_TOKEN  — token with project + repo scopes
+#   GH_TOKEN  — token with project + repo scopes (falls back to gh keyring)
 #   OWNER     — project owner (org or user login)
 #   NUMBER    — project number (integer)
 #   REPO      — "owner/name" of the repo containing the issue
@@ -13,44 +26,53 @@
 # Fails loudly if the project, field, option, or item cannot be resolved.
 set -euo pipefail
 
-: "${GH_TOKEN:?missing}"
+if [ -z "${GH_TOKEN:-}" ]; then
+  GH_TOKEN="$(gh auth token 2>/dev/null || true)"
+  export GH_TOKEN
+fi
+: "${GH_TOKEN:?missing — export GH_TOKEN or authenticate gh first}"
 : "${OWNER:?missing}"
 : "${NUMBER:?missing}"
 : "${REPO:?missing}"
 : "${ISSUE:?missing}"
 : "${STATUS:?missing}"
 
-# 1. Resolve the project's node id, the Status field id, and the matching option id.
+# 1. Resolve the project's node id, the Status field id, and the matching
+# option id. repositoryOwner is the polymorphic root: it resolves whether
+# $OWNER is a User or an Organization, and both fragments collapse to the
+# same .data.repositoryOwner.projectV2 shape.
 PROJECT_JSON=$(gh api graphql -f query='
   query($owner:String!,$number:Int!){
-    user(login:$owner){
-      projectV2(number:$number){
-        id
-        field(name:"Status"){
-          ... on ProjectV2SingleSelectField{
-            id
-            options{ id name }
+    repositoryOwner(login:$owner){
+      ... on User{
+        projectV2(number:$number){
+          id
+          field(name:"Status"){
+            ... on ProjectV2SingleSelectField{
+              id
+              options{ id name }
+            }
           }
         }
       }
-    }
-    organization(login:$owner){
-      projectV2(number:$number){
-        id
-        field(name:"Status"){
-          ... on ProjectV2SingleSelectField{
-            id
-            options{ id name }
+      ... on Organization{
+        projectV2(number:$number){
+          id
+          field(name:"Status"){
+            ... on ProjectV2SingleSelectField{
+              id
+              options{ id name }
+            }
           }
         }
       }
     }
   }' -f owner="$OWNER" -F number="$NUMBER")
 
-PROJECT_ID=$(jq -r '(.data.organization.projectV2.id // .data.user.projectV2.id) // empty' <<<"$PROJECT_JSON")
-FIELD_ID=$(jq -r '(.data.organization.projectV2.field.id // .data.user.projectV2.field.id) // empty' <<<"$PROJECT_JSON")
+PROJECT_ID=$(jq -r '.data.repositoryOwner.projectV2.id // empty' <<<"$PROJECT_JSON")
+FIELD_ID=$(jq -r '.data.repositoryOwner.projectV2.field.id // empty' <<<"$PROJECT_JSON")
 OPTION_ID=$(jq -r --arg s "$STATUS" \
-  '((.data.organization.projectV2.field.options // .data.user.projectV2.field.options // [])[]
+  '((.data.repositoryOwner.projectV2.field.options // [])[]
     | select(.name == $s) | .id)' <<<"$PROJECT_JSON")
 
 if [ -z "$PROJECT_ID" ]; then
@@ -81,20 +103,39 @@ if [ -z "$ISSUE_NODE_ID" ]; then
 fi
 
 # Page through project items until we find one whose content node id matches.
+# TEST-ONLY PATCH (workflow-template#67/#78), defect 4: the canonical loop
+# seeds CURSOR="null" and passes it with -f (raw string), so GraphQL gets
+# the literal string "null" as the cursor and rejects the very first page
+# ("after does not appear to be a valid cursor"). First page must omit the
+# cursor; later pages pass the real endCursor.
 ITEM_ID=""
-CURSOR="null"
+CURSOR=""
 while :; do
-  PAGE=$(gh api graphql -f query='
-    query($pid:ID!,$cursor:String){
-      node(id:$pid){
-        ... on ProjectV2{
-          items(first:100, after:$cursor){
-            pageInfo{ endCursor hasNextPage }
-            nodes{ id content{ ... on Issue{ id } } }
+  if [ -z "$CURSOR" ]; then
+    PAGE=$(gh api graphql -f query='
+      query($pid:ID!,$cursor:String){
+        node(id:$pid){
+          ... on ProjectV2{
+            items(first:100, after:$cursor){
+              pageInfo{ endCursor hasNextPage }
+              nodes{ id content{ ... on Issue{ id } } }
+            }
           }
         }
-      }
-    }' -f pid="$PROJECT_ID" -f cursor="$CURSOR")
+      }' -f pid="$PROJECT_ID")
+  else
+    PAGE=$(gh api graphql -f query='
+      query($pid:ID!,$cursor:String){
+        node(id:$pid){
+          ... on ProjectV2{
+            items(first:100, after:$cursor){
+              pageInfo{ endCursor hasNextPage }
+              nodes{ id content{ ... on Issue{ id } } }
+            }
+          }
+        }
+      }' -f pid="$PROJECT_ID" -f cursor="$CURSOR")
+  fi
   ITEM_ID=$(jq -r --arg iid "$ISSUE_NODE_ID" \
     '.data.node.items.nodes[] | select(.content.id == $iid) | .id' <<<"$PAGE" | head -n1)
   if [ -n "$ITEM_ID" ]; then break; fi
