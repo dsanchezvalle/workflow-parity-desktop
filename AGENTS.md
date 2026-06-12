@@ -125,7 +125,11 @@ documented (the check greps `AGENTS.md` for every `*.yml` basename).
 - `auto-pr` — opens a PR to `develop` when a feature branch is pushed,
   linking it to the originating issue via `Closes #N`.
 - `project-status` — fires on PR open / merge events and updates the
-  linked issue's `status:*` label and Project v2 Status field.
+  linked issue's `status:*` label and Project v2 Status field. Its board
+  steps authenticate with the `PROJECTS_TOKEN` repo secret (a PAT with
+  the `project` scope): the default `GITHUB_TOKEN` cannot access a
+  user-owned Project v2 board, so the label steps keep `GITHUB_TOKEN`
+  while the board steps use the PAT.
 - `issue-status-default` — applies `status: backlog` to newly opened
   issues so every issue starts from a known state.
 - `generate-changelog` — appends a date-grouped entry to `CHANGELOG.md`
