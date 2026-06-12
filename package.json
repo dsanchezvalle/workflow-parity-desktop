@@ -1,0 +1,14 @@
+{
+  "name": "acme-static-site",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Minimal static site fixture for the workflow-template twin-repo parity test.",
+  "scripts": {
+    "lint": "echo \"lint: no linter configured (fixture)\"",
+    "typecheck": "echo \"typecheck: not applicable (static site)\"",
+    "build": "echo \"build: nothing to build (static site)\"",
+    "test": "echo \"test: no tests (fixture)\"",
+    "dev": "npx --yes serve src"
+  },
+  "license": "MIT"
+}

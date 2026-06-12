@@ -1,0 +1,89 @@
+:root {
+  --ink: #1a1a2e;
+  --muted: #555;
+  --accent: #3b5bdb;
+  --bg: #ffffff;
+  --bg-alt: #f5f6fa;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  line-height: 1.5;
+}
+
+.site-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 2rem;
+  border-bottom: 1px solid #eee;
+}
+
+.brand {
+  font-weight: 700;
+  font-size: 1.25rem;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.site-nav a {
+  margin-left: 1.5rem;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+main {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+.hero {
+  text-align: center;
+  padding: 3rem 0;
+}
+
+.hero h1 {
+  font-size: 2.5rem;
+  margin: 0 0 0.5rem;
+}
+
+.btn-primary {
+  display: inline-block;
+  margin-top: 1rem;
+  padding: 0.6rem 1.4rem;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 6px;
+  text-decoration: none;
+  transition: background 0.15s ease;
+}
+
+.features {
+  background: var(--bg-alt);
+  border-radius: 8px;
+  padding: 1.5rem 2rem;
+}
+
+.features ul {
+  list-style: none;
+  padding: 0;
+}
+
+.features li {
+  padding: 0.4rem 0;
+}
+
+.site-footer {
+  text-align: center;
+  color: var(--muted);
+  padding: 2rem;
+  font-size: 0.875rem;
+}
