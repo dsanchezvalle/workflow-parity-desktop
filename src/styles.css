@@ -81,6 +81,16 @@ main {
   padding: 0.4rem 0;
 }
 
+.contact {
+  padding: 1.5rem 2rem;
+  margin-top: 1.5rem;
+}
+
+.contact a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
 .site-footer {
   text-align: center;
   color: var(--muted);
