@@ -2,45 +2,44 @@
 # CORE: agnostic
 # Sets the Status field of a Project v2 item that links to the given issue.
 #
-# TEST-ONLY PATCH (twin-repo parity test — workflow-template#67 / #78).
-# This file diverges from the canonical pack in three ways so the desktop
-# board can sync on a user-owned account:
-#   1. GH_TOKEN falls back to `gh auth token` when not exported
-#      (canonical: hard-required env var, so session-side skill calls fail).
-#   2. Project meta resolves via the polymorphic repositoryOwner(login:)
-#      root (canonical: combined top-level user(...) + organization(...)
-#      query, which errors with NOT_FOUND on user accounts and aborts).
-#   3. Item pagination omits `after` on the first page (canonical seeds the
-#      literal string "null" as the cursor, which GraphQL rejects).
-# The canonical pack stays unpatched on purpose; audit verdicts for this
-# repo record the as-shipped behavior as FAIL. See workflow-template#78.
-#
 # Required env vars:
-#   GH_TOKEN  — token with project + repo scopes (falls back to gh keyring)
-#   OWNER     — project owner (org or user login)
+#   OWNER     — project owner (user or org login)
 #   NUMBER    — project number (integer)
 #   REPO      — "owner/name" of the repo containing the issue
 #   ISSUE     — issue number
 #   STATUS    — option name (must match a Status field option in the project)
 #
+# Optional env vars:
+#   GH_TOKEN  — token with project + repo scopes. If unset, falls back to
+#               `gh auth token` so session-side callers (skills) don't have
+#               to export anything; CI runs always pass it explicitly.
+#
 # Fails loudly if the project, field, option, or item cannot be resolved.
 set -euo pipefail
 
-if [ -z "${GH_TOKEN:-}" ]; then
-  GH_TOKEN="$(gh auth token 2>/dev/null || true)"
-  export GH_TOKEN
-fi
-: "${GH_TOKEN:?missing — export GH_TOKEN or authenticate gh first}"
 : "${OWNER:?missing}"
 : "${NUMBER:?missing}"
 : "${REPO:?missing}"
 : "${ISSUE:?missing}"
 : "${STATUS:?missing}"
 
+# D1: skills invoke this sidecar without exporting GH_TOKEN. Fall back to
+# the user's gh auth token so the session path works; keep the loud
+# failure if neither is available.
+if [ -z "${GH_TOKEN:-}" ]; then
+  GH_TOKEN="$(gh auth token 2>/dev/null || true)"
+  if [ -z "$GH_TOKEN" ]; then
+    echo "::error::GH_TOKEN unset and 'gh auth token' returned nothing" >&2
+    exit 1
+  fi
+  export GH_TOKEN
+fi
+
 # 1. Resolve the project's node id, the Status field id, and the matching
-# option id. repositoryOwner is the polymorphic root: it resolves whether
-# $OWNER is a User or an Organization, and both fragments collapse to the
-# same .data.repositoryOwner.projectV2 shape.
+# option id via the polymorphic repositoryOwner(login:) root, which works
+# on both User and Organization owners. The previous combined
+# user{} + organization{} query made `gh api graphql` exit non-zero on
+# the wrong resolver (NOT_FOUND), aborting the script before any fallback.
 PROJECT_JSON=$(gh api graphql -f query='
   query($owner:String!,$number:Int!){
     repositoryOwner(login:$owner){
@@ -72,8 +71,8 @@ PROJECT_JSON=$(gh api graphql -f query='
 PROJECT_ID=$(jq -r '.data.repositoryOwner.projectV2.id // empty' <<<"$PROJECT_JSON")
 FIELD_ID=$(jq -r '.data.repositoryOwner.projectV2.field.id // empty' <<<"$PROJECT_JSON")
 OPTION_ID=$(jq -r --arg s "$STATUS" \
-  '((.data.repositoryOwner.projectV2.field.options // [])[]
-    | select(.name == $s) | .id)' <<<"$PROJECT_JSON")
+  '(.data.repositoryOwner.projectV2.field.options // [])[]
+    | select(.name == $s) | .id' <<<"$PROJECT_JSON")
 
 if [ -z "$PROJECT_ID" ]; then
   echo "::error::Project v2 #$NUMBER not found under $OWNER" >&2
@@ -103,20 +102,20 @@ if [ -z "$ISSUE_NODE_ID" ]; then
 fi
 
 # Page through project items until we find one whose content node id matches.
-# TEST-ONLY PATCH (workflow-template#67/#78), defect 4: the canonical loop
-# seeds CURSOR="null" and passes it with -f (raw string), so GraphQL gets
-# the literal string "null" as the cursor and rejects the very first page
-# ("after does not appear to be a valid cursor"). First page must omit the
-# cursor; later pages pass the real endCursor.
+# D4: GraphQL's `after` argument is a nullable String. Passing the literal
+# string "null" with `-f` typed the cursor as the string "null" and the
+# API rejected the first page with "after does not appear to be a valid
+# cursor". Use a distinct query shape for the first page (no `after`) and
+# pass real cursors with `-f` on subsequent pages.
 ITEM_ID=""
 CURSOR=""
 while :; do
   if [ -z "$CURSOR" ]; then
     PAGE=$(gh api graphql -f query='
-      query($pid:ID!,$cursor:String){
+      query($pid:ID!){
         node(id:$pid){
           ... on ProjectV2{
-            items(first:100, after:$cursor){
+            items(first:100){
               pageInfo{ endCursor hasNextPage }
               nodes{ id content{ ... on Issue{ id } } }
             }
@@ -125,7 +124,7 @@ while :; do
       }' -f pid="$PROJECT_ID")
   else
     PAGE=$(gh api graphql -f query='
-      query($pid:ID!,$cursor:String){
+      query($pid:ID!,$cursor:String!){
         node(id:$pid){
           ... on ProjectV2{
             items(first:100, after:$cursor){

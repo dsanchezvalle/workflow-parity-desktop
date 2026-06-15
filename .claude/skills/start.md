@@ -20,9 +20,12 @@ The orchestrator. Runs other skills in sequence, never skips a step.
   Rationale: skipping `/analyze` means there is no plan to review,
   which makes `code-review (plan)` operate on nothing and breaks the
   audit trail.
-- The issue has an **approved plan** comment. Approval signal: a thumbs-up
-  reaction from the issue owner, or a comment containing the literal word
-  `approved` from a maintainer.
+- The issue has an **approved plan** comment. The **only** valid approval
+  signal is a comment containing the literal word `approved` from a
+  maintainer. Reactions (thumbs-up etc.) are **not** accepted: they are
+  easy to mis-click, easy to miss in audit, and not visible as a durable
+  decision record. This matches the mobile pack's stricter form and the
+  maintainer's operational convention.
 - The working tree is clean (`git status` empty).
 - The default branch is `develop`. Pull latest before branching.
 
@@ -73,7 +76,29 @@ If any precondition fails, **stop** and tell the human exactly which one.
 
 - Confirm the PR was opened (poll `gh pr view <branch>` for up to 30s).
 - Confirm `project-status.yml` moved the issue to In Review.
+- **Fill the verification slot in the PR body.** `auto-pr.yml` opens
+  the PR with a `## Verification` section containing the placeholder
+  `<!-- start fills here -->`. Replace it with the 1–3 line
+  verification summary required by the start contract:
+
+  ```bash
+  PR=<pr-number>
+  SUMMARY="<1-3 lines: build pass, tests, what was visually checked>"
+  CURRENT=$(gh pr view "$PR" --json body --jq .body)
+  NEW=${CURRENT/<!-- start fills here -->/$SUMMARY}
+  gh pr edit "$PR" --body "$NEW"
+  ```
+
+  If the placeholder is absent (e.g. consumer pinned an older
+  `auto-pr.yml`), append a fresh `## Verification` section with the
+  same summary text instead of editing the placeholder.
 - Watch CI; if a check fails, fix it before tagging a reviewer.
+- **Decision breadcrumbs.** If during the implementation you pivoted
+  technically, dropped or added scope versus the approved plan, or
+  acted on a `code-review` `REQUEST CHANGES` iteration, post a
+  `[decision] <what changed> — <why>.` comment on **both** the issue
+  and the PR (same text on both surfaces) per AGENTS.md →
+  Decision-breadcrumb convention.
 
 ## Re-run policy
 
