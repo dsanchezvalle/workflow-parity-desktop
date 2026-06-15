@@ -1,5 +1,6 @@
 ## 2026-06-14
 
+- feat(homepage): add Get in touch button linking to mailto (#15)
 - chore: sync workflow-template pack to v1.10.1 (#86) (#12)
 
 ## 2026-06-12
