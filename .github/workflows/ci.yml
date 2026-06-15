@@ -1,0 +1,52 @@
+# ADAPTER: claude
+# Template — placeholders filled at activate time from .workflow-staging/context.yml.
+name: CI
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+      - 'feat/**'
+      - 'fix/**'
+      - 'docs/**'
+      - 'refactor/**'
+      - 'chore/**'
+      - 'test/**'
+  pull_request:
+    branches:
+      - develop
+      - main
+    # No `synchronize` — push: feat/** etc. already triggers CI on every commit.
+    # Including synchronize would double-run CI for every push to a PR'd branch.
+    types: [opened, reopened]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test

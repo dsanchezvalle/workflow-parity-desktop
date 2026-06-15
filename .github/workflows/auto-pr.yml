@@ -1,0 +1,149 @@
+# CORE: agnostic
+# Opens a PR automatically when a feature/fix/etc. branch is pushed.
+# Extracts the issue number from the branch name (e.g. feat/123-add-foo -> #123).
+name: Auto PR
+
+on:
+  push:
+    branches:
+      - 'feat/**'
+      - 'fix/**'
+      - 'docs/**'
+      - 'refactor/**'
+      - 'chore/**'
+      - 'test/**'
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: read
+
+jobs:
+  open-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract metadata
+        id: meta
+        run: |
+          BRANCH="${GITHUB_REF#refs/heads/}"
+          TYPE="${BRANCH%%/*}"
+          REST="${BRANCH#*/}"
+          ISSUE="${REST%%-*}"
+          if ! [[ "$ISSUE" =~ ^[0-9]+$ ]]; then ISSUE=""; fi
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "type=$TYPE"     >> "$GITHUB_OUTPUT"
+          echo "issue=$ISSUE"   >> "$GITHUB_OUTPUT"
+
+      - name: Open or update PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ steps.meta.outputs.branch }}
+          TYPE: ${{ steps.meta.outputs.type }}
+          ISSUE: ${{ steps.meta.outputs.issue }}
+        run: |
+          set -euo pipefail
+          if gh pr view "$BRANCH" --json number >/dev/null 2>&1; then
+            echo "PR already exists for $BRANCH; skipping."
+            exit 0
+          fi
+
+          # Make sure origin/develop is locally available for commit counting.
+          # actions/checkout@v4 with fetch-depth: 0 fetches all branches in the
+          # common case, but be defensive in case the runner state diverges.
+          git fetch origin develop:refs/remotes/origin/develop 2>/dev/null || true
+
+          # Pre-compute the first commit subject and the commit count of
+          # this branch (since it diverged from develop). These two values
+          # power tier 1 (default — use first commit subject) and gate the
+          # tier 2 trigger (multi-commit + linked issue → use issue title).
+          #
+          # Both git invocations may fail under set -euo pipefail if
+          # origin/develop is not available (the defensive fetch above can
+          # fail in unusual runner states). Catch each so the script can
+          # still reach the tier 3 legacy fallback and open the PR. Without
+          # this, the workflow regresses behaviour that worked pre-tier
+          # logic.
+          FIRST_SUBJECT="$(git log --reverse --format='%s' origin/develop..HEAD 2>/dev/null | head -n1)" || FIRST_SUBJECT=""
+          COMMIT_COUNT="$(git rev-list --count origin/develop..HEAD 2>/dev/null)" || COMMIT_COUNT=0
+          [ -z "$COMMIT_COUNT" ] && COMMIT_COUNT=0
+
+          # Conventional Commits type list. Kept in lockstep with the filter
+          # in generate-changelog.yml — if you add a new type here, also add
+          # it to the `grep -E '\|(...)(\([^)]+\))?!?: '` filter in that
+          # workflow. Both regexes accept the breaking-change marker
+          # (`feat!:`, `feat(scope)!:`) via `!?`. `revert` is included so a
+          # `revert: ...` subject is recognised as already-CC and not
+          # prefixed with the branch type.
+          CC_TYPES='(feat|fix|docs|refactor|chore|test|ci|build|perf|style|revert)'
+
+          TITLE=""
+
+          # Tier 2: multi-commit PR with a known issue link. Use the issue
+          # title instead of an arbitrary first-commit subject.
+          if [ "$COMMIT_COUNT" -gt 1 ] && [ -n "$ISSUE" ]; then
+            if ISSUE_TITLE=$(gh issue view "$ISSUE" --json title --jq .title 2>/dev/null); then
+              if [ -n "$ISSUE_TITLE" ]; then
+                # Strip a single leading [bracket-tag] (e.g. "[Post-MVP] Foo"
+                # becomes "Foo"). Common in personal-tag prefixes; keep it
+                # simple and only strip ONE leading bracket so titles like
+                # "fix [auth]: bar" stay intact.
+                CLEANED=$(printf '%s' "$ISSUE_TITLE" | sed -E 's/^\[[^]]+\][[:space:]]*//')
+                # Guard against a title that was *only* a bracket (e.g.
+                # "[wip]") — CLEANED would be empty; falling through to
+                # tier 3 is more useful than emitting "feat: ".
+                if [ -n "$CLEANED" ]; then
+                  # If the cleaned title already follows Conventional Commits,
+                  # keep as-is. Otherwise prepend the branch's type. The `!?`
+                  # accepts the breaking-change marker (e.g. `feat!:`,
+                  # `feat(scope)!:`).
+                  if printf '%s' "$CLEANED" | grep -qE "^${CC_TYPES}(\([^)]+\))?!?:[[:space:]]"; then
+                    TITLE="$CLEANED"
+                  else
+                    TITLE="$TYPE: $CLEANED"
+                  fi
+                fi
+              fi
+            else
+              echo "::warning::gh issue view #$ISSUE failed; falling through to commit-subject tier."
+            fi
+          fi
+
+          # If tier 2 didn't fire, choose between:
+          #   Tier 1 (default): the first commit subject we pre-computed.
+          #     If it already follows Conventional Commits (with or without
+          #     the breaking-change `!`), keep it; otherwise prepend the
+          #     type derived from the branch prefix.
+          #   Tier 3 (last-resort fallback): legacy `<type>: <branch-suffix>`
+          #     form. Hits when neither the issue title (tier 2) nor the
+          #     commit log (tier 1) are usable.
+          if [ -z "$TITLE" ]; then
+            if [ -n "$FIRST_SUBJECT" ]; then
+              if printf '%s' "$FIRST_SUBJECT" | grep -qE "^${CC_TYPES}(\([^)]+\))?!?:[[:space:]]"; then
+                TITLE="$FIRST_SUBJECT"
+              else
+                TITLE="$TYPE: $FIRST_SUBJECT"
+              fi
+            else
+              # Tier 3 (last-resort): legacy branch-suffix format.
+              TITLE="$TYPE: ${BRANCH#*/}"
+            fi
+          fi
+
+          BODY="Automated PR for branch \`$BRANCH\`."
+          if [ -n "$ISSUE" ]; then
+            BODY="$BODY"$'\n\n'"Closes #$ISSUE."
+          fi
+          # Leave a placeholder section for the `start` skill's verification
+          # summary. Without it the start contract (1–3 line verification
+          # summary in the PR body) has no slot to fill — the body is
+          # static. start posts its summary into this slot via `gh pr edit`.
+          BODY="$BODY"$'\n\n'"## Verification"$'\n\n'"<!-- start fills here -->"
+          gh pr create \
+            --base develop \
+            --head "$BRANCH" \
+            --title "$TITLE" \
+            --body "$BODY"

@@ -1,0 +1,134 @@
+# CORE: agnostic
+# Single owner of issue lifecycle.
+#
+# Default mode (always on): label-driven —
+#   `status: in progress` → `status: in review` (PR open) → `status: done` (PR merged + issue closed).
+#
+# Opt-in mode: if repo variable PROJECT_NUMBER is set, ALSO update the matching
+# Status field on a Project v2 board owned by the repo owner. Mapping:
+#   in progress -> "In Progress"
+#   in review   -> "In Review"
+#   done        -> "Done"
+#
+# The setup script populates PROJECT_NUMBER via:
+#   gh variable set PROJECT_NUMBER --body "$NUMBER"
+#
+# Triggered via workflow_run because PRs created with GITHUB_TOKEN (auto-pr.yml)
+# do NOT emit pull_request events.
+name: Project Status
+
+on:
+  workflow_run:
+    workflows: ["Auto PR"]
+    types: [completed]
+  pull_request:
+    types: [opened, reopened, closed]
+    branches: [develop]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  repository-projects: write
+
+jobs:
+  on-pr-open:
+    if: >
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+      || (github.event_name == 'pull_request' && github.event.action != 'closed')
+    runs-on: ubuntu-latest
+    steps:
+      # Needed so the board step can execute .github/scripts/project-status-set.sh.
+      - uses: actions/checkout@v4
+
+      - name: Resolve PR and issue
+        id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            PR="${{ github.event.pull_request.number }}"
+            BRANCH="${{ github.event.pull_request.head.ref }}"
+          else
+            BRANCH="${{ github.event.workflow_run.head_branch }}"
+            PR=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number // empty')
+          fi
+          REST="${BRANCH#*/}"
+          ISSUE="${REST%%-*}"
+          if ! [[ "$ISSUE" =~ ^[0-9]+$ ]]; then ISSUE=""; fi
+          echo "pr=$PR" >> "$GITHUB_OUTPUT"
+          echo "issue=$ISSUE" >> "$GITHUB_OUTPUT"
+
+      - name: Update labels (in review)
+        if: steps.resolve.outputs.issue != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh issue edit "${{ steps.resolve.outputs.issue }}" \
+            --add-label "status: in review" \
+            --remove-label "status: in progress"
+
+      - name: Update Project v2 board (opt-in)
+        if: steps.resolve.outputs.issue != '' && vars.PROJECT_NUMBER != ''
+        env:
+          # User-owned Project v2 boards are not accessible via the
+          # default GITHUB_TOKEN. Repos using a personal-account board
+          # set a PROJECTS_TOKEN secret (PAT with `project` scope) and
+          # this fallback picks it up automatically — no pack-file edit
+          # required. Org-owned boards keep working with GITHUB_TOKEN.
+          GH_TOKEN: ${{ secrets.PROJECTS_TOKEN || secrets.GITHUB_TOKEN }}
+          OWNER:   ${{ github.repository_owner }}
+          NUMBER:  ${{ vars.PROJECT_NUMBER }}
+          ISSUE:   ${{ steps.resolve.outputs.issue }}
+          REPO:    ${{ github.repository }}
+          STATUS:  "In Review"
+        run: |
+          set -euo pipefail
+          bash .github/scripts/project-status-set.sh
+
+  on-pr-merged:
+    if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      # Needed so the board step can execute .github/scripts/project-status-set.sh.
+      - uses: actions/checkout@v4
+
+      - name: Resolve issue
+        id: resolve
+        env:
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          REST="${BRANCH#*/}"
+          ISSUE="${REST%%-*}"
+          if ! [[ "$ISSUE" =~ ^[0-9]+$ ]]; then ISSUE=""; fi
+          echo "issue=$ISSUE" >> "$GITHUB_OUTPUT"
+
+      - name: Close and label Done
+        if: steps.resolve.outputs.issue != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh issue close "${{ steps.resolve.outputs.issue }}" --reason completed
+          gh issue edit "${{ steps.resolve.outputs.issue }}" \
+            --add-label "status: done" \
+            --remove-label "status: in review"
+
+      - name: Update Project v2 board (opt-in)
+        if: steps.resolve.outputs.issue != '' && vars.PROJECT_NUMBER != ''
+        env:
+          # See note on the In Review step above — same PROJECTS_TOKEN
+          # fallback so user-owned boards work without per-repo edits.
+          GH_TOKEN: ${{ secrets.PROJECTS_TOKEN || secrets.GITHUB_TOKEN }}
+          OWNER:   ${{ github.repository_owner }}
+          NUMBER:  ${{ vars.PROJECT_NUMBER }}
+          ISSUE:   ${{ steps.resolve.outputs.issue }}
+          REPO:    ${{ github.repository }}
+          STATUS:  "Done"
+        run: |
+          set -euo pipefail
+          bash .github/scripts/project-status-set.sh
