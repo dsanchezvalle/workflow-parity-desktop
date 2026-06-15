@@ -38,9 +38,7 @@ jobs:
       || (github.event_name == 'pull_request' && github.event.action != 'closed')
     runs-on: ubuntu-latest
     steps:
-      # TEST-ONLY PATCH (workflow-template#67/#78): the canonical pack omits
-      # checkout, so the board step's `bash .github/scripts/...` cannot find
-      # the sidecar on the runner. Checkout only reads the repo tree.
+      # Needed so the board step can execute .github/scripts/project-status-set.sh.
       - uses: actions/checkout@v4
 
       - name: Resolve PR and issue
@@ -76,9 +74,12 @@ jobs:
       - name: Update Project v2 board (opt-in)
         if: steps.resolve.outputs.issue != '' && vars.PROJECT_NUMBER != ''
         env:
-          # PAT with project scope: the default GITHUB_TOKEN cannot access a
-          # user-owned Project v2 board. See PROJECTS_TOKEN repo secret.
-          GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+          # User-owned Project v2 boards are not accessible via the
+          # default GITHUB_TOKEN. Repos using a personal-account board
+          # set a PROJECTS_TOKEN secret (PAT with `project` scope) and
+          # this fallback picks it up automatically — no pack-file edit
+          # required. Org-owned boards keep working with GITHUB_TOKEN.
+          GH_TOKEN: ${{ secrets.PROJECTS_TOKEN || secrets.GITHUB_TOKEN }}
           OWNER:   ${{ github.repository_owner }}
           NUMBER:  ${{ vars.PROJECT_NUMBER }}
           ISSUE:   ${{ steps.resolve.outputs.issue }}
@@ -92,7 +93,7 @@ jobs:
     if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
-      # TEST-ONLY PATCH (workflow-template#67/#78): see on-pr-open.
+      # Needed so the board step can execute .github/scripts/project-status-set.sh.
       - uses: actions/checkout@v4
 
       - name: Resolve issue
@@ -120,9 +121,9 @@ jobs:
       - name: Update Project v2 board (opt-in)
         if: steps.resolve.outputs.issue != '' && vars.PROJECT_NUMBER != ''
         env:
-          # PAT with project scope: the default GITHUB_TOKEN cannot access a
-          # user-owned Project v2 board. See PROJECTS_TOKEN repo secret.
-          GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+          # See note on the In Review step above — same PROJECTS_TOKEN
+          # fallback so user-owned boards work without per-repo edits.
+          GH_TOKEN: ${{ secrets.PROJECTS_TOKEN || secrets.GITHUB_TOKEN }}
           OWNER:   ${{ github.repository_owner }}
           NUMBER:  ${{ vars.PROJECT_NUMBER }}
           ISSUE:   ${{ steps.resolve.outputs.issue }}

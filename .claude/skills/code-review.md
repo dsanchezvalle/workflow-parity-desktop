@@ -69,3 +69,53 @@ Output: `APPROVE` or `REQUEST CHANGES`, with line items keyed to file:line.
 - Never approve code without seeing test output.
 - Never approve a `code` review if `plan` mode was skipped.
 - If the diff and the plan disagree, the plan wins — request changes.
+
+## Decision breadcrumbs
+
+When this review returns `REQUEST CHANGES` and the change is acted on
+(i.e. the next pass differs from the previous diff in response to the
+findings), post a concise `[decision]` comment on **both** the issue
+and the PR per AGENTS.md → Decision-breadcrumb convention. Same text on
+both surfaces. One or two lines, format `[decision] <what changed> —
+<why>.`
+
+## External reviewer (Codex CLI) — context delivery
+
+When delegating `mode=code` to an external reviewer via Codex CLI (e.g.
+`codex review --base develop`), the diff alone is not enough: the
+reviewer cannot judge plan alignment, scope discipline, or workflow-rule
+compliance without `AGENTS.md`, the issue body, and the approved plan.
+The mobile equivalent (`review-pack` → Codex web) avoids this by feeding
+the reviewer a packet with this context — desktop must do the same.
+
+Recommended invocation: assemble the same packet as `review-pack`
+produces and pipe it into Codex CLI as additional context. Minimum
+viable form:
+
+```bash
+ISSUE=<issue-number>
+PR=<pr-number>
+{
+  echo "## AGENTS.md"
+  cat AGENTS.md
+  echo
+  echo "## Issue #$ISSUE"
+  gh issue view "$ISSUE" --json title,body,comments \
+    --jq '"\n# " + .title + "\n\n" + .body + "\n\n## Comments\n" + ((.comments // []) | map("- " + .author.login + ": " + (.body | gsub("\n"; " "))) | join("\n"))'
+  echo
+  echo "## PR #$PR"
+  gh pr view "$PR" --json title,body --jq '"\n# " + .title + "\n\n" + .body'
+} > /tmp/review-context.md
+
+codex review --base develop - < /tmp/review-context.md
+```
+
+(The `-` reads the packet from stdin and feeds it to the reviewer as
+the prompt's context preamble. Earlier drafts referenced a
+`--context` flag — that flag does not exist in the installed Codex
+CLI; use stdin.)
+
+Without this, Codex CLI's verdict depth will visibly trail the mobile
+reviewer's on the same diff — it will catch raw correctness bugs but
+miss workflow-compliance blockers (approval gate, verification body,
+scope creep) that depend on rules only present in the packet.

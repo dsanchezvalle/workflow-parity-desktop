@@ -52,7 +52,8 @@ Constraints: must not create a branch, must not write code.
 
 Inputs: issue number, link to the approved plan comment.
 Preconditions:
-  - the issue has an approved plan comment (human reaction or "approved" comment),
+  - the issue has an approved plan comment (a comment containing the literal
+    word "approved" from a maintainer — reactions are not valid),
   - working tree is clean,
   - default branch is `develop`.
 Steps:
@@ -125,18 +126,7 @@ documented (the check greps `AGENTS.md` for every `*.yml` basename).
 - `auto-pr` — opens a PR to `develop` when a feature branch is pushed,
   linking it to the originating issue via `Closes #N`.
 - `project-status` — fires on PR open / merge events and updates the
-  linked issue's `status:*` label and Project v2 Status field. Its board
-  steps authenticate with the `PROJECTS_TOKEN` repo secret (a PAT with
-  the `project` scope): the default `GITHUB_TOKEN` cannot access a
-  user-owned Project v2 board, so the label steps keep `GITHUB_TOKEN`
-  while the board steps use the PAT.
-  **Test-only parity patch** (workflow-template#67/#78, not part of the
-  canonical pack): both jobs add a `checkout` step (the canonical pack
-  omits it, so the board steps cannot find the sidecar on the runner),
-  and `project-status-set.sh` resolves the owner via the polymorphic
-  `repositoryOwner` query plus a `gh auth token` fallback (the canonical
-  combined user+org query errors on user-owned accounts). Audit verdicts
-  for this repo record the as-shipped behavior as FAIL.
+  linked issue's `status:*` label and Project v2 Status field.
 - `issue-status-default` — applies `status: backlog` to newly opened
   issues so every issue starts from a known state.
 - `generate-changelog` — appends a date-grouped entry to `CHANGELOG.md`
@@ -191,6 +181,44 @@ Notes:
 - All label mutations in `project-status.yml` run **without** `|| true` —
   if a label is missing or misnamed, the workflow fails. Do not silence it.
 
+## Decision-breadcrumb convention
+
+The issue carries the original intent (analyze plan, status labels).
+The PR carries the diff and its review comments. Any **decision that
+changes the trajectory after the plan was approved** must leave a
+concise breadcrumb on **both surfaces** so a future reader can
+reconstruct *why* the implementation ended where it did without
+opening the chat.
+
+**Trigger events** (any of):
+
+- A `code-review` (plan or code mode) iteration that returned
+  `REQUEST CHANGES` and was acted on.
+- A technical pivot mid-implementation (chosen approach abandoned for
+  a different one).
+- A business clarification surfaced from review feedback that
+  changes acceptance criteria.
+- A scope adjustment (item dropped, item added) relative to the
+  approved plan.
+
+**Format** — one or two lines, posted as a comment on both the issue
+and the PR with the same text:
+
+```
+[decision] <what changed> — <why>.
+```
+
+Example:
+
+```
+[decision] Switched from in-process queue to Redis Streams — review
+flagged that the in-process queue loses messages on pod restart.
+```
+
+The executing skill (`start`, `code-review`) posts the comment when it
+detects a trigger event. The engineer may append a follow-up comment
+with deeper rationale when the one-liner is insufficient.
+
 ## Invariants
 
 - `start` never runs without an approved plan comment.
@@ -198,3 +226,5 @@ Notes:
 - A skill never edits another skill's output.
 - The setup conversation (`/workflow-setup`) is the only entry point that
   writes to `.workflow-staging/`.
+- Any trigger event listed under **Decision-breadcrumb convention**
+  must leave a matching breadcrumb on both the issue and the PR.

@@ -137,6 +137,11 @@ jobs:
           if [ -n "$ISSUE" ]; then
             BODY="$BODY"$'\n\n'"Closes #$ISSUE."
           fi
+          # Leave a placeholder section for the `start` skill's verification
+          # summary. Without it the start contract (1–3 line verification
+          # summary in the PR body) has no slot to fill — the body is
+          # static. start posts its summary into this slot via `gh pr edit`.
+          BODY="$BODY"$'\n\n'"## Verification"$'\n\n'"<!-- start fills here -->"
           gh pr create \
             --base develop \
             --head "$BRANCH" \
