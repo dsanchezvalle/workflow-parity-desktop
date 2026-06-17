@@ -1,12 +1,23 @@
 <!-- CORE: agnostic -->
 ---
 name: start
-description: Orchestrate the implementation of an approved issue end-to-end — branch, plan-review, implement, code-review, verify, push. Use when the user says "start #N", "let's implement #N", or when the analyze plan has been approved.
+description: Orchestrate the implementation of an approved issue end-to-end — branch, plan-review, implement, code-review, verify, push. Works in both desktop (gh CLI) and web/mobile (git + GitHub MCP) sessions via capability detection. Use when the user says "start #N", "let's implement #N", or when the analyze plan has been approved.
 ---
 
 # start
 
 The orchestrator. Runs other skills in sequence, never skips a step.
+
+> **One skill, two surfaces.** The body below is the desktop path
+> (authenticated `gh` CLI). In a web/mobile session without `gh`,
+> version-control operations (branch, commit, rebase, push) still use
+> `git`; every GitHub API read/write goes through the GitHub MCP server.
+> Read the body for *what* each step does, then apply the **MCP /
+> web-session overrides** appendix at the end for *how*.
+>
+> **Capability detection.** If an authenticated `gh` is available, follow
+> the body as written. If not, and a GitHub MCP server is connected, follow
+> the appendix. If neither is available, stop and say so.
 
 ## Preconditions
 
@@ -22,24 +33,29 @@ The orchestrator. Runs other skills in sequence, never skips a step.
   audit trail.
 - The issue has an **approved plan** comment. The **only** valid approval
   signal is a comment containing the literal word `approved` from a
-  maintainer. Reactions (thumbs-up etc.) are **not** accepted: they are
-  easy to mis-click, easy to miss in audit, and not visible as a durable
-  decision record. This matches the mobile pack's stricter form and the
-  maintainer's operational convention.
+  maintainer on the issue — a durable, auditable decision record visible
+  to any future reader of the thread. If it does not exist, stop and ask
+  the human to post one.
 - The working tree is clean (`git status` empty).
 - The default branch is `develop`. Pull latest before branching.
+- The remote is reachable (`git fetch origin` succeeds). If it fails, stop
+  and report the exact error — do not implement work the session cannot
+  push.
 
 If any precondition fails, **stop** and tell the human exactly which one.
 
 ## Steps
 
 1. **Move issue to In Progress.** Apply `status: in progress` and remove
-   `status: ready`. If the repo variable `PROJECT_NUMBER` is set, also
-   invoke the sidecar to mirror the move onto the Project v2 board:
+   `status: ready`. If a Project v2 board is configured, also invoke the
+   sidecar to mirror the move onto it:
 
    ```bash
    OWNER=$(gh repo view --json owner -q .owner.login)
-   NUMBER=$(gh variable get PROJECT_NUMBER 2>/dev/null || echo "")
+   # Project number: prefer the committed .github/project.env, fall back to
+   # the legacy PROJECT_NUMBER repo variable (pre-v1.11 installs).
+   NUMBER=$(grep -E '^PROJECT_NUMBER=' .github/project.env 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '[:space:]')
+   NUMBER=${NUMBER:-$(gh variable get PROJECT_NUMBER 2>/dev/null || echo "")}
    if [ -n "$NUMBER" ]; then
      OWNER="$OWNER" NUMBER="$NUMBER" \
      REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)" \
@@ -51,12 +67,19 @@ If any precondition fails, **stop** and tell the human exactly which one.
    `project-status.yml` does **not** handle this transition — it runs on
    PR events, and at this point in the flow there is no PR yet. The
    workflow takes over for `In Review` (PR open) and `Done` (PR merged).
-   Label names are exact — see `AGENTS.md` → `Required labels`.
+   Where `project-status-labeled.yml` is installed, applying the label also
+   moves the board; the sidecar call stays as the desktop primary and the
+   two are idempotent. Label names are exact — see `AGENTS.md` →
+   `Required labels`.
 2. **Branch** from `origin/develop`:
    - Type prefix from the issue's `type/*` label (or asked, if absent):
      one of `feat`, `fix`, `docs`, `refactor`, `chore`, `test`.
    - Slug: kebab-case of the issue title, max 6 words.
    - Branch name: `<type>/<issue>-<slug>`.
+   - **Fail-fast push check**: run `git push --dry-run -u origin <branch>`
+     now. A dry run contacts the remote without updating refs or triggering
+     workflows. If it fails (auth, permissions), stop and report the exact
+     error before any implementation work happens.
 3. **Plan review** — invoke `code-review` in `plan` mode against the
    approved plan. If `REQUEST CHANGES`, post the review on the issue, stop.
 4. **Implement** — write code in logical commits. Each commit:
@@ -65,7 +88,9 @@ If any precondition fails, **stop** and tell the human exactly which one.
    - is small enough to review on its own.
 5. **Code review** — invoke `code-review` in `code` mode. If
    `REQUEST CHANGES`, fix in new commits and re-run. Do not amend reviewed
-   commits.
+   commits. If `code-review` stops because the toolchain is unavailable in
+   this environment (web/mobile), resolve that first — do not push
+   unreviewed code.
 6. **Sync check** — if any of `CLAUDE.md`, `AGENTS.md`, or
    `.github/workflows/` changed, run `verify-sync`. If it fails, stop.
 7. **Rebase** onto `origin/develop`. Resolve any conflicts in the PR
@@ -74,7 +99,20 @@ If any precondition fails, **stop** and tell the human exactly which one.
 
 ## Post-push
 
-- Confirm the PR was opened (poll `gh pr view <branch>` for up to 30s).
+- **Confirm the PR was opened.** `auto-pr.yml` is the **sole** PR
+  creator — do **not** run `gh pr create`. Poll `gh pr view <branch>`
+  for up to 30s / 6 × 5s. If the PR is still absent after 30s, check
+  whether an `auto-pr` workflow run is still pending:
+  ```bash
+  gh run list --workflow=auto-pr.yml --branch <branch> \
+    --json status,conclusion \
+    --jq '[.[] | select(.status == "in_progress" or .status == "queued")]'
+  ```
+  If a run is pending or just completed, wait up to another 30s. Only
+  if polling times out **and** no `auto-pr` run is pending or succeeded,
+  fall back to `gh pr create`. If the fallback returns a 422 / "A pull
+  request already exists" error, treat it as success and re-fetch with
+  `gh pr view <branch>`.
 - Confirm `project-status.yml` moved the issue to In Review.
 - **Fill the verification slot in the PR body.** `auto-pr.yml` opens
   the PR with a `## Verification` section containing the placeholder
@@ -140,13 +178,13 @@ Stop and reply:
 >        --remove-label "status: in review" \
 >        --add-label "status: ready"
 >      ```
->   4. **If this repo has `PROJECT_NUMBER` set** (Project v2 board
->      installed), also move the issue back to the `Ready` column —
->      labels alone won't reset the board because
+>   4. **If a Project v2 board is configured**, also move the issue back
+>      to the `Ready` column — labels alone won't reset the board because
 >      `project-status.yml` only handles merged PRs:
 >      ```bash
 >      OWNER=$(gh repo view --json owner -q .owner.login)
->      NUMBER=$(gh variable get PROJECT_NUMBER 2>/dev/null || echo "")
+>      NUMBER=$(grep -E '^PROJECT_NUMBER=' .github/project.env 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '[:space:]')
+>      NUMBER=${NUMBER:-$(gh variable get PROJECT_NUMBER 2>/dev/null || echo "")}
 >      if [ -n "$NUMBER" ]; then
 >        OWNER="$OWNER" NUMBER="$NUMBER" \
 >          REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)" \
@@ -236,7 +274,7 @@ produced them.
 
 **Forbidden in any external artifact**:
 - Skill names invoked during the workflow (`/analyze`, `/start`,
-  `/code-review`, etc.).
+  `/code-review`, `/review-pack`, etc.).
 - Status label values used as workflow references (e.g.,
   `status: ready`, `status: in progress`, `effort/E2`) — if a change's
   state is worth mentioning, describe it in plain language.
@@ -279,3 +317,77 @@ produced them.
   names, PR title/body, or documentation produced as part of the
   deliverable. See the "Anti-leak rule" section under External output
   style.
+
+## MCP / web-session overrides
+
+Apply this section **instead of** the `gh`/sidecar mechanics in the body
+when you are in a web/mobile session without an authenticated `gh`. `git`
+still owns version control; only the GitHub API mechanics differ. The
+*what* of every step is unchanged. (Keep this appendix in sync with the
+body whenever either changes — see
+[#84](https://github.com/dsanchezvalle/workflow-template/issues/84).)
+
+### Tooling contract
+
+- **Resolve tools by capability, not prefix.** The canonical GitHub MCP
+  names used here (`get_issue`, `get_issue_comments`, `update_issue`,
+  `list_pull_requests`, `get_pull_request`, `get_pull_request_status`)
+  may be exposed under a server-specific prefix — match by name suffix.
+- **No GitHub MCP server connected → fail loud.** Stop and tell the human:
+  connect the GitHub MCP integration, or run this issue in a desktop
+  session where `gh` is available.
+- **Field discipline (token efficiency).** Pick the narrowest tool; cap
+  page sizes on list calls; extract only the fields each step needs. Never
+  re-fetch an object already read this session. Never quote a full MCP
+  payload into the conversation, a commit, or a PR body.
+
+### Step overrides
+
+- **Preconditions** — read the `status:*` / `effort/*` labels with
+  `get_issue` (keep `labels[].name` only). Read the approval thread with
+  `get_issue_comments` (author + body only) and confirm a maintainer
+  `approved` comment exists. `git fetch origin` / `git push --dry-run`
+  preconditions are git-native and run unchanged.
+- **Step 1 (In Progress)** — apply `status: in progress` / remove
+  `status: ready` with read-modify-write (most servers' `update_issue`
+  replaces the full label set: take the names you already read, swap the
+  two, write back; prefer dedicated add/remove-label tools if present). Do
+  **not** invoke the sidecar and do **not** mutate the board from the
+  session — `project-status-labeled.yml` moves the card from the label
+  event, reading the number from `.github/project.env`.
+- **Steps 2, 4, 6, 7, 8** — git-native (branch, commit, sync check,
+  rebase, push), unchanged.
+- **Steps 3 & 5 (reviews)** — invoke `code-review` (same skill); in
+  `code` mode its toolchain preconditions apply (see that skill's
+  MCP appendix).
+- **Post-push: confirm the PR.** `auto-pr.yml` is still the sole creator —
+  do **not** call `create_pull_request`. Poll `list_pull_requests`
+  (state=open; keep `number`, `head.ref`, `state`) for up to 30s / 6 × 5s,
+  matching the head branch **locally** by comparing `head.ref` to your
+  branch — do not filter by `head: <owner>:<branch>`, since PRs opened by
+  `github-actions[bot]` are not returned by that server-side filter. If the
+  PR is still absent after 30s, check for a pending `auto-pr` run
+  (`list_workflow_runs` for "Auto PR", `status: in_progress`/`queued`);
+  wait up to another 30s. Only if polling times out **and** no run is
+  pending/succeeded, fall back to `create_pull_request`; treat a 422
+  "already exists" as success and re-fetch with `list_pull_requests`.
+- **Post-push: confirm In Review.** Re-read labels with `get_issue` (keep
+  `labels[].name`) and verify `status: in review` appears; if absent after
+  30s, post a warning comment noting the label was not observed.
+- **Post-push: fill the verification slot.** Read the PR body with
+  `get_pull_request`, substitute the `<!-- start fills here -->`
+  placeholder with the 1–3 line verification summary, and write it back
+  with `update_pull_request`. If the placeholder is absent (older
+  `auto-pr.yml`), append a fresh `## Verification` section instead.
+- **Post-push: watch CI** via the PR's check results
+  (`get_pull_request_status` or the server's check-runs tool — keep check
+  names + conclusions only).
+- **Re-run cleanup** — close the open PR with `update_pull_request`
+  (state `closed`) or the UI; delete the branch
+  (`git branch -D <branch>` + `git push origin --delete <branch>`); swap
+  labels back to `status: ready` with read-modify-write. The board
+  move-back is automatic (re-applying `status: ready` triggers the labeled
+  workflow). No manual board step, no sidecar.
+- **Re-run remote-branch scan** — find an in-flight branch with
+  `git ls-remote --heads origin | grep -E '/(feat|fix|docs|refactor|chore|test)/<issue>-'`
+  (no MCP call needed); check for its open PR with `list_pull_requests`.
