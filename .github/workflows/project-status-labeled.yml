@@ -1,0 +1,271 @@
+# CORE: agnostic
+# Server-side Project v2 board sync — the single board writer for repos
+# on the mobile pack. The session never mutates the board.
+#
+# The board mirrors the issue lifecycle through two kinds of events:
+#
+# 1. Label events (`issues: labeled`) — `status:*` labels applied by a
+#    session over MCP (ready / in progress, plus backlog on re-run
+#    cleanup) or by a human in the UI. Mapping (exact names, see
+#    AGENTS.md → Required labels):
+#      status: backlog      -> Backlog
+#      status: ready        -> Ready
+#      status: in progress  -> In Progress
+#      status: in review    -> In Review
+#      status: done         -> Done
+#
+# 2. Lifecycle events — the transitions whose labels are applied by
+#    OTHER WORKFLOWS with secrets.GITHUB_TOKEN. GitHub suppresses
+#    GITHUB_TOKEN-made writes as workflow triggers (the same limitation
+#    project-status.yml documents for auto-pr.yml's PRs), so those
+#    label events never reach this workflow. The board therefore
+#    listens to the underlying events directly:
+#      issues: opened                          -> Backlog
+#        (the label itself comes from issue-status-default.yml)
+#      pull_request opened/reopened + Auto PR workflow_run -> In Review
+#      pull_request closed & merged            -> Done
+#        (those labels come from project-status.yml)
+#
+# Opt-in: the project number is read from the committed file
+# .github/project.env (PROJECT_NUMBER=<n>), with the legacy PROJECT_NUMBER
+# repo variable as a fallback (pre-v1.11 installs). Both empty/absent means
+# labels-only mode — the run logs a notice and exits green. project.env is
+# the preferred source; when both are set they must name the same project
+# (verify.sh validates this).
+#
+# If the issue is not yet an item on the board it is added first
+# (addProjectV2ItemById is idempotent), so the issue-opened event
+# creates its card directly in Backlog.
+#
+# Token note: secrets.GITHUB_TOKEN must be able to see the project. If
+# the GraphQL step fails with NOT_FOUND or FORBIDDEN on a board you can
+# see in the UI, store a PAT with the `project` scope as a secret and
+# point GH_TOKEN at it.
+name: Project Status (Labeled)
+
+on:
+  issues:
+    types: [opened, labeled]
+  pull_request:
+    types: [opened, reopened, closed]
+    branches: [develop]
+  workflow_run:
+    workflows: ["Auto PR"]
+    types: [completed]
+
+permissions:
+  contents: read
+  issues: read
+  repository-projects: write
+
+jobs:
+  sync-board:
+    # issues: opened or a status:* label; PRs: open/reopen or merged
+    # close (a close without merge moves nothing — parity with
+    # project-status.yml); workflow_run: successful Auto PR only.
+    if: >
+      (github.event_name == 'issues'
+        && (github.event.action == 'opened'
+            || startsWith(github.event.label.name, 'status:')))
+      || (github.event_name == 'pull_request'
+        && (github.event.action != 'closed'
+            || github.event.pull_request.merged == true))
+      || (github.event_name == 'workflow_run'
+        && github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      # Checkout only to read .github/project.env from the default branch.
+      - uses: actions/checkout@v4
+
+      - name: Resolve project number
+        id: project
+        env:
+          # Legacy fallback: pre-v1.11 desktop installs carry the number in
+          # the PROJECT_NUMBER repo variable rather than .github/project.env.
+          VAR_NUMBER: ${{ vars.PROJECT_NUMBER }}
+        run: |
+          set -euo pipefail
+          NUMBER=""
+          if [ -f .github/project.env ]; then
+            NUMBER=$(grep -E '^PROJECT_NUMBER=' .github/project.env | head -n1 | cut -d= -f2- | tr -d '[:space:]')
+          fi
+          # Fall back to the legacy repo variable when the file is empty/absent.
+          NUMBER="${NUMBER:-$VAR_NUMBER}"
+          if [ -z "$NUMBER" ]; then
+            echo "::notice::No project number (.github/project.env empty and no PROJECT_NUMBER variable) — labels-only mode, skipping board sync."
+          elif ! printf '%s' "$NUMBER" | grep -qE '^[0-9]+$'; then
+            echo "::error::project number '$NUMBER' is not an integer (check .github/project.env or the PROJECT_NUMBER variable)" >&2
+            exit 1
+          fi
+          echo "number=$NUMBER" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve issue and Status column
+        if: steps.project.outputs.number != ''
+        id: target
+        env:
+          EVENT: ${{ github.event_name }}
+          ACTION: ${{ github.event.action }}
+          LABEL: ${{ github.event.label.name }}
+          EVENT_ISSUE: ${{ github.event.issue.number }}
+          EVENT_NODE_ID: ${{ github.event.issue.node_id }}
+          PR_HEAD: ${{ github.event.pull_request.head.ref }}
+          WR_HEAD: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+          ISSUE=""
+          NODE_ID=""
+          STATUS=""
+          case "$EVENT" in
+            issues)
+              if [ "$ACTION" = "opened" ]; then
+                STATUS="Backlog"
+              else
+                case "$LABEL" in
+                  "status: backlog")     STATUS="Backlog" ;;
+                  "status: ready")       STATUS="Ready" ;;
+                  "status: in progress") STATUS="In Progress" ;;
+                  "status: in review")   STATUS="In Review" ;;
+                  "status: done")        STATUS="Done" ;;
+                  *)
+                    echo "::error::Status label '$LABEL' has no Status column mapping. Use the canonical labels from AGENTS.md → Required labels, or extend the mapping in this workflow." >&2
+                    exit 1
+                    ;;
+                esac
+              fi
+              ISSUE="$EVENT_ISSUE"
+              NODE_ID="$EVENT_NODE_ID"
+              ;;
+            pull_request|workflow_run)
+              if [ "$EVENT" = "pull_request" ]; then
+                BRANCH="$PR_HEAD"
+                if [ "$ACTION" = "closed" ]; then
+                  STATUS="Done"   # merged-only: unmerged closes are filtered at the job `if`
+                else
+                  STATUS="In Review"
+                fi
+              else
+                BRANCH="$WR_HEAD"
+                STATUS="In Review"
+              fi
+              REST="${BRANCH#*/}"
+              ISSUE="${REST%%-*}"
+              if ! printf '%s' "$ISSUE" | grep -qE '^[0-9]+$'; then
+                echo "::notice::Branch '$BRANCH' carries no issue number — nothing to sync."
+                ISSUE=""
+              fi
+              ;;
+          esac
+          {
+            echo "issue=$ISSUE"
+            echo "node_id=$NODE_ID"
+            echo "status=$STATUS"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Update Project v2 board
+        if: steps.project.outputs.number != '' && steps.target.outputs.issue != ''
+        env:
+          # User-owned Project v2 boards are not accessible via the
+          # default GITHUB_TOKEN. Repos using a personal-account board
+          # set a PROJECTS_TOKEN secret (PAT with `project` scope) and
+          # this fallback picks it up automatically — no pack-file edit.
+          GH_TOKEN: ${{ secrets.PROJECTS_TOKEN || secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+          NUMBER: ${{ steps.project.outputs.number }}
+          ISSUE: ${{ steps.target.outputs.issue }}
+          ISSUE_NODE_ID: ${{ steps.target.outputs.node_id }}
+          STATUS: ${{ steps.target.outputs.status }}
+        run: |
+          set -euo pipefail
+
+          # PR-derived targets carry only the issue number; resolve the
+          # node id here.
+          if [ -z "$ISSUE_NODE_ID" ]; then
+            ISSUE_NODE_ID=$(gh api graphql -f query='
+              query($owner:String!,$name:String!,$num:Int!){
+                repository(owner:$owner,name:$name){
+                  issue(number:$num){ id }
+                }
+              }' -f owner="${GITHUB_REPOSITORY%%/*}" -f name="${GITHUB_REPOSITORY#*/}" -F num="$ISSUE" \
+              --jq '.data.repository.issue.id')
+            if [ -z "$ISSUE_NODE_ID" ]; then
+              echo "::error::Issue #$ISSUE not found in $GITHUB_REPOSITORY" >&2
+              exit 1
+            fi
+          fi
+
+          # The owner can be a user or an organization. Querying the
+          # wrong GraphQL resolver errors the whole call, so detect the
+          # owner type first and run only the matching query (same
+          # approach as verify.sh's Project v2 check in the template).
+          OWNER_TYPE=$(gh api "users/$OWNER" --jq .type)
+          if [ "$OWNER_TYPE" = "Organization" ]; then
+            PROJECT_JSON=$(gh api graphql -f query='
+              query($owner:String!,$number:Int!){
+                organization(login:$owner){
+                  projectV2(number:$number){
+                    id
+                    field(name:"Status"){
+                      ... on ProjectV2SingleSelectField{ id options{ id name } }
+                    }
+                  }
+                }
+              }' -f owner="$OWNER" -F number="$NUMBER" \
+              --jq '.data.organization.projectV2')
+          else
+            PROJECT_JSON=$(gh api graphql -f query='
+              query($owner:String!,$number:Int!){
+                user(login:$owner){
+                  projectV2(number:$number){
+                    id
+                    field(name:"Status"){
+                      ... on ProjectV2SingleSelectField{ id options{ id name } }
+                    }
+                  }
+                }
+              }' -f owner="$OWNER" -F number="$NUMBER" \
+              --jq '.data.user.projectV2')
+          fi
+
+          PROJECT_ID=$(jq -r '.id // empty' <<<"$PROJECT_JSON")
+          FIELD_ID=$(jq -r '.field.id // empty' <<<"$PROJECT_JSON")
+          OPTION_ID=$(jq -r --arg s "$STATUS" \
+            '(.field.options // [])[] | select(.name == $s) | .id' <<<"$PROJECT_JSON")
+
+          if [ -z "$PROJECT_ID" ]; then
+            echo "::error::Project v2 #$NUMBER not found under $OWNER — check PROJECT_NUMBER in .github/project.env" >&2
+            exit 1
+          fi
+          if [ -z "$FIELD_ID" ]; then
+            echo "::error::Project $OWNER/#$NUMBER has no 'Status' single-select field" >&2
+            exit 1
+          fi
+          if [ -z "$OPTION_ID" ]; then
+            echo "::error::Status field has no option named '$STATUS'" >&2
+            exit 1
+          fi
+
+          # Add the issue to the board, then set the column. The add
+          # mutation is idempotent: it returns the existing item id if
+          # the issue is already on the board.
+          ITEM_ID=$(gh api graphql -f query='
+            mutation($pid:ID!,$cid:ID!){
+              addProjectV2ItemById(input:{ projectId:$pid, contentId:$cid }){
+                item{ id }
+              }
+            }' -f pid="$PROJECT_ID" -f cid="$ISSUE_NODE_ID" \
+            --jq '.data.addProjectV2ItemById.item.id')
+
+          if [ -z "$ITEM_ID" ]; then
+            echo "::error::Could not add issue #$ISSUE to project $OWNER/#$NUMBER" >&2
+            exit 1
+          fi
+
+          gh api graphql -f query='
+            mutation($pid:ID!,$item:ID!,$field:ID!,$opt:String!){
+              updateProjectV2ItemFieldValue(
+                input:{ projectId:$pid, itemId:$item, fieldId:$field,
+                        value:{ singleSelectOptionId:$opt } }
+              ){ projectV2Item{ id } }
+            }' -f pid="$PROJECT_ID" -f item="$ITEM_ID" -f field="$FIELD_ID" -f opt="$OPTION_ID" >/dev/null
+
+          echo "Project $OWNER/#$NUMBER: issue #$ISSUE -> Status='$STATUS'"

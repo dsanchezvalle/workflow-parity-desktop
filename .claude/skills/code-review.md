@@ -79,43 +79,52 @@ and the PR per AGENTS.md → Decision-breadcrumb convention. Same text on
 both surfaces. One or two lines, format `[decision] <what changed> —
 <why>.`
 
-## External reviewer (Codex CLI) — context delivery
+## External reviewer — context delivery (reviewer-agnostic)
 
-When delegating `mode=code` to an external reviewer via Codex CLI (e.g.
-`codex review --base develop`), the diff alone is not enough: the
-reviewer cannot judge plan alignment, scope discipline, or workflow-rule
+The pack's own reviewer is this `code-review` skill (Claude). Separately,
+you may want an **external** reviewer — a second opinion or a human-driven
+pass with whatever tool you prefer. The pack does not invoke one and does
+not depend on any: that step is yours, outside the workflow.
+
+When you do reach for an external reviewer, the diff alone is not enough —
+it cannot judge plan alignment, scope discipline, or workflow-rule
 compliance without `AGENTS.md`, the issue body, and the approved plan.
-The mobile equivalent (`review-pack` → Codex web) avoids this by feeding
-the reviewer a packet with this context — desktop must do the same.
+Use the `review-pack` skill to assemble a neutral REVIEW CONTEXT PACKET
+(issue + PR metadata, rules, approved plan, changed files, checks) and hand
+that packet to whatever reviewer you use. `review-pack` only prepares
+context — it never invokes a tool, posts a comment, or pushes.
 
-Recommended invocation: assemble the same packet as `review-pack`
-produces and pipe it into Codex CLI as additional context. Minimum
-viable form:
+Without that context, an external reviewer's verdict depth will trail this
+skill's on the same diff: it will catch raw correctness bugs but miss
+workflow-compliance blockers (approval gate, verification body, scope
+creep) that depend on rules only present in the packet.
 
-```bash
-ISSUE=<issue-number>
-PR=<pr-number>
-{
-  echo "## AGENTS.md"
-  cat AGENTS.md
-  echo
-  echo "## Issue #$ISSUE"
-  gh issue view "$ISSUE" --json title,body,comments \
-    --jq '"\n# " + .title + "\n\n" + .body + "\n\n## Comments\n" + ((.comments // []) | map("- " + .author.login + ": " + (.body | gsub("\n"; " "))) | join("\n"))'
-  echo
-  echo "## PR #$PR"
-  gh pr view "$PR" --json title,body --jq '"\n# " + .title + "\n\n" + .body'
-} > /tmp/review-context.md
+## MCP / web-session overrides
 
-codex review --base develop - < /tmp/review-context.md
-```
+In a web/mobile session (no authenticated `gh`, and an environment that may
+lack the project's toolchain), this skill runs the **same checks** with one
+addition. (Keep this appendix in sync with the body whenever either changes
+— see [#84](https://github.com/dsanchezvalle/workflow-template/issues/84).)
 
-(The `-` reads the packet from stdin and feeds it to the reviewer as
-the prompt's context preamble. Earlier drafts referenced a
-`--context` flag — that flag does not exist in the installed Codex
-CLI; use stdin.)
+### Toolchain preconditions (mode `code`)
 
-Without this, Codex CLI's verdict depth will visibly trail the mobile
-reviewer's on the same diff — it will catch raw correctness bugs but
-miss workflow-compliance blockers (approval gate, verification body,
-scope creep) that depend on rules only present in the packet.
+The environment may lack the project's runtime, package manager, or network
+access for dependencies. Before reviewing code, resolve the project's
+lint / typecheck / test commands from `CLAUDE.md` and try them:
+
+- If the commands **run** — even if they report failures — proceed with the
+  review. Failures are review findings, not environment problems.
+- If a command **cannot run at all** (interpreter or package manager
+  missing, dependencies not installable, no network), **stop**. Output
+  neither `APPROVE` nor `REQUEST CHANGES`. State exactly which command
+  failed and which prerequisite is missing, then give the recovery options:
+  provision this environment (install the runtime / dependencies), or run
+  this review in a desktop session where the toolchain is available.
+- "Toolchain absent" is a loud stop, never an implicit approval path —
+  skipping the test gate silently would approve unverified code. This is
+  the web/mobile elaboration of the "Never approve code without seeing test
+  output" hard rule above.
+
+Everything else in the body applies unchanged. An external reviewer is
+reached the same way regardless of surface: assemble a `review-pack` packet
+and hand it off.

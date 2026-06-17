@@ -60,7 +60,10 @@ jobs:
         run: |
           set -euo pipefail
           BASE_REF="origin/${{ github.base_ref }}"
-          git fetch origin "${{ github.base_ref }}" --depth=1
+          # Shallow checkouts may not include the merge-base; unshallow so
+          # the three-dot diff resolves correctly on all PRs.
+          git fetch --unshallow origin "${{ github.base_ref }}" 2>/dev/null \
+            || git fetch origin "${{ github.base_ref }}"
           changed=$(git diff --name-only "$BASE_REF"...HEAD)
           workflow_changed=$(echo "$changed" | grep -E '^\.github/workflows/' || true)
           docs_changed=$(echo "$changed" | grep -E '^(CLAUDE\.md|AGENTS\.md)$' || true)

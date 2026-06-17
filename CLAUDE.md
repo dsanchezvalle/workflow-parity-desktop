@@ -50,6 +50,7 @@ Invoke these via natural language; the harness routes by description.
 | [analyze](.claude/skills/analyze.md)           | Triage an issue, classify E0–E3, post a plan.            |
 | [start](.claude/skills/start.md)               | Begin implementation after plan approval.                |
 | [code-review](.claude/skills/code-review.md)   | Review plan (pre-impl) or code (pre-merge).              |
+| [review-pack](.claude/skills/review-pack.md)   | Build a neutral context packet for an external reviewer. |
 | [deploy-pipeline](.claude/skills/deploy-pipeline.md) | Pre-deploy checklist for this stack.                     |
 | [changelog-reporter](.claude/skills/changelog-reporter.md) | Append a date-based changelog entry on merge to develop. |
 | [verify-sync](.claude/skills/verify-sync.md)   | Verify CLAUDE.md / AGENTS.md ↔ workflows are in sync.    |
