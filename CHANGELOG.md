@@ -1,3 +1,7 @@
+## 2026-06-18
+
+- feat(homepage): add footer note (#18)
+
 ## 2026-06-17
 
 - chore: sync workflow-template (9 changes from upstream)
