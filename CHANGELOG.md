@@ -1,5 +1,14 @@
+## 2026-06-18
+
+- feat(homepage): add footer note (#18)
+
+## 2026-06-17
+
+- chore: sync workflow-template (9 changes from upstream)
+
 ## 2026-06-14
 
+- feat(homepage): add Get in touch button linking to mailto (#15)
 - chore: sync workflow-template pack to v1.10.1 (#86) (#12)
 
 ## 2026-06-12

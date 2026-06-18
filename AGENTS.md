@@ -53,7 +53,7 @@ Constraints: must not create a branch, must not write code.
 Inputs: issue number, link to the approved plan comment.
 Preconditions:
   - the issue has an approved plan comment (a comment containing the literal
-    word "approved" from a maintainer — reactions are not valid),
+    word "approved" from a maintainer — the only valid approval signal),
   - working tree is clean,
   - default branch is `develop`.
 Steps:
@@ -87,6 +87,17 @@ Checks:
   - Conventional Commit messages,
   - tests cover the change (unit at minimum; integration if I/O involved).
 Output: APPROVE / REQUEST CHANGES, with line items.
+
+### review-pack
+
+Inputs: PR number (required), linked issue number (optional).
+Outputs: a neutral REVIEW CONTEXT PACKET (issue/PR intent, acceptance
+criteria, scope, decisions, changed files, checks, risks) formatted for
+handoff to an external reviewer. Read-only — never modifies files, posts
+comments, or pushes.
+Tooling: capability-detected — GitHub MCP (web/mobile) or `gh` (desktop).
+Use: an optional external review pass the engineer runs; the pack's own
+reviewer is `code-review`, and the pack stays reviewer-agnostic.
 
 ### deploy-pipeline
 
@@ -127,6 +138,12 @@ documented (the check greps `AGENTS.md` for every `*.yml` basename).
   linking it to the originating issue via `Closes #N`.
 - `project-status` — fires on PR open / merge events and updates the
   linked issue's `status:*` label and Project v2 Status field.
+- `project-status-labeled` — server-side Project v2 board sync. Listens to
+  `issues: labeled` and PR open/merge events and moves the board card to the
+  matching column, reading the number from `.github/project.env` (falling
+  back to the legacy `PROJECT_NUMBER` variable). Keeps the board in sync for
+  web/mobile sessions with no session-side sidecar, and is idempotent with
+  the `project-status-set.sh` sidecar the desktop skills call.
 - `issue-status-default` — applies `status: backlog` to newly opened
   issues so every issue starts from a known state.
 - `generate-changelog` — appends a date-grouped entry to `CHANGELOG.md`
