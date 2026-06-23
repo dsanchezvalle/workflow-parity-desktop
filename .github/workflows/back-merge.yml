@@ -1,7 +1,11 @@
 # CORE: agnostic
 # After a release lands on main, fast-forward (or merge-commit) main back into
 # develop so develop never lags. Subject prefix is `back-merge:` so the
-# generate-changelog workflow can ignore it.
+# generate-changelog workflow can ignore it (and --no-merges drops it anyway).
+# No [skip ci] in the merge message: the bot pushes with GITHUB_TOKEN (which
+# doesn't re-trigger workflows), and a [skip ci] here would poison develop's
+# tip — a release PR opened right after a back-merge would inherit it and the
+# required `ci` check would never run.
 name: Back-merge
 
 on:
@@ -34,6 +38,6 @@ jobs:
           if git merge --ff-only origin/main; then
             echo "fast-forwarded develop"
           else
-            git merge --no-ff -m "back-merge: main into develop [skip ci]" origin/main
+            git merge --no-ff -m "back-merge: main into develop" origin/main
           fi
           git push origin develop

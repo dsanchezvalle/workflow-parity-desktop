@@ -5,9 +5,16 @@
 #   - brownfield first-runs (history dated by real commit date, not collapsed under "today")
 #   - late re-runs after a failed/blocked workflow
 #   - any case where commits and workflow-run dates differ
-# Skips its own commits via [skip ci] in the subject and via an explicit
-# match on `chore(changelog): update`. Opt-out per commit via
-# [skip changelog] in the subject.
+# Loop-safe WITHOUT [skip ci] in the commit message. The bot pushes with
+# GITHUB_TOKEN, and pushes authenticated with GITHUB_TOKEN do not trigger
+# new workflow runs (GitHub's recursive-run guard), so this workflow never
+# re-fires on its own changelog commit. The job-level `if:` on the
+# `chore(changelog): update` subject is defense-in-depth for the rare
+# PAT-push setup. [skip ci] is deliberately NOT used here: it would later
+# poison the develop->main release boundary — the release PR's head commit
+# would carry [skip ci] (the required `ci` check never runs -> PR blocked),
+# and a squash to main folds [skip ci] into its body (silencing back-merge
+# and ci on main). Opt-out per commit via [skip changelog].
 name: Generate Changelog
 
 on:
@@ -19,7 +26,7 @@ permissions:
 
 jobs:
   generate:
-    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    if: "!startsWith(github.event.head_commit.message, 'chore(changelog): update')"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -55,12 +62,14 @@ jobs:
           # Filters (in order):
           #   - drop back-merges
           #   - drop [skip changelog] opt-out
-          #   - drop [skip ci] (workflow's own bot commits and any other
-          #     manually skipped commits)
-          #   - drop the workflow's own changelog-update commits explicitly
-          #     (defense in depth — [skip ci] should already cover them,
-          #     but matching the literal subject keeps it correct even if
-          #     someone strips [skip ci] in a future iteration)
+          #   - drop [skip ci] (commits a maintainer manually marked to
+          #     skip; the bot's own commits no longer carry this marker)
+          #   - drop the workflow's own changelog-update commits by subject.
+          #     This is the PRIMARY self-exclusion guard now: the changelog
+          #     commit no longer carries [skip ci] (that marker poisoned the
+          #     release boundary), so matching the literal
+          #     subject is what keeps the workflow from listing its own
+          #     commits.
           #   - keep only conventional-commit subjects
           COMMITS=$(git log "${RANGE_ARGS[@]}" --no-merges --pretty=format:'%cs|%s' \
             | grep -Ev '\|back-merge:' \
@@ -198,5 +207,5 @@ jobs:
           git config user.email 'github-actions[bot]@users.noreply.github.com'
           git add CHANGELOG.md
           git diff --cached --quiet && exit 0
-          git commit -m 'chore(changelog): update [skip ci]'
+          git commit -m 'chore(changelog): update'
           git push
