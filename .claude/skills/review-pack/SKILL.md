@@ -1,7 +1,10 @@
-<!-- CORE: agnostic -->
 ---
 name: review-pack
 description: "Generate a compact, neutral REVIEW CONTEXT PACKET for an external reviewer. Collects GitHub issue and PR metadata (title, body, acceptance criteria, scope, comments, decisions, changed files, checks, risks) via the GitHub MCP server or the gh CLI (whichever the session has) and formats it for pasting into another review tool. Use when the user wants to prepare a PR/issue review packet, share context with an external reviewer (e.g. Codex web), or summarize a GitHub PR and its linked issue. Never modifies files, posts comments, or pushes commits."
+# Manual-only: this is a handoff tool the engineer/tech-lead invokes
+# explicitly with /review-pack. The model must never auto-trigger it by
+# relevance, and its description is not preloaded into context.
+disable-model-invocation: true
 ---
 
 # review-pack
@@ -42,18 +45,28 @@ else renders unchanged.
 
 ## Step 2 — Identify the repository
 
-Detect owner and repo from the current working directory's git remote:
+Detect owner and repo as the **last two path segments** of the current
+working directory's `origin` remote — so it works regardless of host,
+scheme, embedded auth, port, or proxy/path-style URL, not just `github.com`:
 
 ```bash
-git remote get-url origin
+git remote get-url origin \
+  | sed -E 's#/+$##; s#\.git$##; s#.*[/:]([^/:]+)/([^/]+)$#\1/\2#'
 ```
 
-Parse `owner/repo` from the URL. Handle both HTTPS
-(`https://github.com/owner/repo.git`) and SSH (`git@github.com:owner/repo.git`)
-forms. Strip `.git` suffix if present.
+This yields `owner/repo` for every real remote form:
 
-If the remote URL cannot be parsed, report the error and stop. Do not ask the
-user to supply the repo name.
+- HTTPS — `https://github.com/owner/repo.git`
+- SSH (scp-style) — `git@github.com:owner/repo.git`
+- auth-in-URL / explicit port — `https://user@host:443/owner/repo`
+- proxy / path-style — `http://local_proxy@127.0.0.1/.../git/owner/repo`
+
+Taking the final two segments (and matching the separator before `owner` as
+either `/` or `:`) keeps the host/scheme/auth/port portion irrelevant. Strip
+a trailing `.git` (and any trailing slash) first.
+
+If the remote URL cannot be parsed into `owner/repo`, report the error and
+stop. Do not ask the user to supply the repo name.
 
 ---
 

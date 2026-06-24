@@ -43,17 +43,19 @@ Commits: [Conventional Commits](https://www.conventionalcommits.org/).
 
 ## Skill index
 
-Invoke these via natural language; the harness routes by description.
+Invoke these via natural language; the harness routes by description. The
+exception is `review-pack`, which is **manual-only** (`/review-pack`) — it
+carries `disable-model-invocation: true`, so the model never auto-triggers it.
 
-| Skill                                          | When to use                                              |
-| ---------------------------------------------- | -------------------------------------------------------- |
-| [analyze](.claude/skills/analyze.md)           | Triage an issue, classify E0–E3, post a plan.            |
-| [start](.claude/skills/start.md)               | Begin implementation after plan approval.                |
-| [code-review](.claude/skills/code-review.md)   | Review plan (pre-impl) or code (pre-merge).              |
-| [review-pack](.claude/skills/review-pack.md)   | Build a neutral context packet for an external reviewer. |
-| [deploy-pipeline](.claude/skills/deploy-pipeline.md) | Pre-deploy checklist for this stack.                     |
-| [changelog-reporter](.claude/skills/changelog-reporter.md) | Append a date-based changelog entry on merge to develop. |
-| [verify-sync](.claude/skills/verify-sync.md)   | Verify CLAUDE.md / AGENTS.md ↔ workflows are in sync.    |
+| Skill                                                       | When to use                                              |
+| ----------------------------------------------------------- | -------------------------------------------------------- |
+| [analyze](.claude/skills/analyze/SKILL.md)                  | Triage an issue, classify E0–E3, post a plan.            |
+| [start](.claude/skills/start/SKILL.md)                      | Begin implementation after plan approval.                |
+| [code-review](.claude/skills/code-review/SKILL.md)          | Review plan (pre-impl) or code (pre-merge).              |
+| [review-pack](.claude/skills/review-pack/SKILL.md)          | Build a neutral context packet for an external reviewer (manual `/review-pack`). |
+| [deploy-pipeline](.claude/skills/deploy-pipeline/SKILL.md)  | Pre-deploy checklist for this stack.                     |
+| [changelog-reporter](.claude/skills/changelog-reporter/SKILL.md) | Append a date-based changelog entry on merge to develop. |
+| [verify-sync](.claude/skills/verify-sync/SKILL.md)          | Verify CLAUDE.md / AGENTS.md ↔ workflows are in sync.    |
 
 ## Project conventions
 

@@ -1,4 +1,3 @@
-<!-- CORE: agnostic -->
 ---
 name: analyze
 description: Triage a GitHub issue, classify it E0–E3, and post a sized plan as a comment. Works in both desktop (gh CLI) and web/mobile (GitHub MCP) sessions via capability detection. Use when the user says "analyze #N", "triage this issue", or pastes an issue URL and asks how to approach it.
@@ -208,9 +207,7 @@ auto-overwrites the previous artifact.
 
 Apply this section **instead of** the `gh`/sidecar mechanics in the body
 when you are in a web/mobile session without an authenticated `gh`. The
-*what* of every step is unchanged — only the *how* differs. (Keep this
-appendix in sync with the body whenever either changes — see
-[#84](https://github.com/dsanchezvalle/workflow-template/issues/84).)
+*what* of every step is unchanged — only the *how* differs.
 
 ### Tooling contract
 

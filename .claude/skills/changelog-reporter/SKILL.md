@@ -1,4 +1,3 @@
-<!-- CORE: agnostic -->
 ---
 name: changelog-reporter
 description: Append a date-grouped entry to CHANGELOG.md when commits land on develop. Use when the user says "update the changelog" or as part of the generate-changelog workflow.
@@ -11,9 +10,10 @@ changed and when, not a release artifact.
 
 ## Trigger
 
-Push to `develop` (excluding commits with `[skip ci]`). The
-`generate-changelog.yml` workflow invokes this skill in CI; locally, the user
-can invoke it manually.
+Push to `develop`. The `generate-changelog.yml` workflow invokes this skill
+in CI — it skips its own `chore(changelog): update` commits via a job-level
+`if:` subject guard (not `[skip ci]`, which would poison the develop→main
+release boundary). Locally, the user can invoke it manually.
 
 ## Behavior
 
@@ -33,8 +33,11 @@ can invoke it manually.
    alphabetical within each group.
 4. Skip commits whose subject contains `[skip changelog]`.
 5. Skip merge commits whose only purpose is back-merge (`back-merge: ...`).
-6. Commit the change with subject `chore(changelog): update [skip ci]` so
-   the workflow does not re-trigger itself.
+6. Commit the change with subject `chore(changelog): update`. Do **not** add
+   `[skip ci]`: the bot pushes with `GITHUB_TOKEN` (which never re-triggers
+   workflows), and a `[skip ci]` marker would later block the develop→main
+   release PR and silence back-merge on the squash to main. The
+   workflow excludes this commit from future runs by matching its subject.
 
 ## Format invariants
 

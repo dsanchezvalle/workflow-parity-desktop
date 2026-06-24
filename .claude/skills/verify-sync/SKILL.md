@@ -1,4 +1,3 @@
-<!-- CORE: agnostic -->
 ---
 name: verify-sync
 description: Verify that CLAUDE.md, AGENTS.md, and .github/workflows/ describe the same reality — bidirectionally. Use when docs or workflows changed, before pushing, and inside the start orchestration.
@@ -24,8 +23,8 @@ another, or vice versa. Bidirectional — both directions are checked.
 
 ### Reality → docs
 
-- Every file under `.claude/skills/*.md` is referenced in the `CLAUDE.md`
-  skill index. (No orphaned skills.)
+- Every skill under `.claude/skills/<name>/SKILL.md` is referenced in the
+  `CLAUDE.md` skill index. (No orphaned skills.)
 - Every file under `.github/workflows/*.yml` is described in `AGENTS.md` (in
   the flow diagram or the skill specs section). (No orphaned workflows.)
 - Every script under `scripts/` referenced by a workflow exists.
@@ -49,15 +48,10 @@ The semantic pass catches drift in **behavior described**:
    them. Drift between `AGENTS.md` and the skill file = the contract
    is wrong somewhere.
 4. **Label set consistency** — the canonical labels in
-   `AGENTS.md → Required labels` (this destination repo) must equal:
-     - the `gh label create` list in `github-driven/setup/github-checklist.md`
-       **in the workflow-template clone** (not in this destination repo), and
-     - the `canonical` array in `github-driven/scripts/verify.sh`
-       **in the workflow-template clone** (same).
-   Three sources of truth must agree. When this skill runs in the
-   destination repo, only `AGENTS.md` is inspectable here; the two
-   template-side paths are pointers for the human/agent to cross-check
-   when drift is suspected.
+   `AGENTS.md → Required labels` are the single source of truth for
+   this repo. Any workflow or script here that hard-codes a label set
+   (status automation, issue defaults) must match that list. Drift =
+   automation acting on labels the docs don't declare.
 
 The skill reports drift; the human or `start` orchestrator decides.
 This skill **never auto-fixes**.

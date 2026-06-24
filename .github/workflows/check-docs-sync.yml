@@ -23,23 +23,24 @@ jobs:
         run: |
           set -euo pipefail
           missing=0
-          # Every .claude/skills/*.md must be referenced via its full link
-          # path in CLAUDE.md. Plain mentions of the skill name in prose
-          # do not count.
-          for f in .claude/skills/*.md; do
-            name=$(basename "$f" .md)
-            if ! grep -q "\.claude/skills/$name\.md" CLAUDE.md; then
+          # Skills are directory-form: .claude/skills/<name>/SKILL.md. Every
+          # one must be referenced via its full link path in CLAUDE.md. Plain
+          # mentions of the skill name in prose do not count.
+          shopt -s nullglob
+          for f in .claude/skills/*/SKILL.md; do
+            name=$(basename "$(dirname "$f")")
+            if ! grep -q "\.claude/skills/$name/SKILL\.md" CLAUDE.md; then
               echo "::error file=CLAUDE.md::skill '$name' is not referenced in CLAUDE.md"
               missing=1
             fi
           done
-          # Every link from CLAUDE.md to .claude/skills/* must resolve.
+          # Every link from CLAUDE.md to .claude/skills/<name>/SKILL.md must resolve.
           while IFS= read -r path; do
             if [ ! -f "$path" ]; then
               echo "::error file=CLAUDE.md::referenced skill file '$path' does not exist"
               missing=1
             fi
-          done < <(grep -oE '\.claude/skills/[a-zA-Z0-9_.-]+\.md' CLAUDE.md | sort -u)
+          done < <(grep -oE '\.claude/skills/[a-zA-Z0-9_.-]+/SKILL\.md' CLAUDE.md | sort -u)
           exit $missing
 
       - name: Verify workflows referenced in AGENTS.md

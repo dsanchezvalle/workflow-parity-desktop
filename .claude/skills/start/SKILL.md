@@ -1,4 +1,3 @@
-<!-- CORE: agnostic -->
 ---
 name: start
 description: Orchestrate the implementation of an approved issue end-to-end — branch, plan-review, implement, code-review, verify, push. Works in both desktop (gh CLI) and web/mobile (git + GitHub MCP) sessions via capability detection. Use when the user says "start #N", "let's implement #N", or when the analyze plan has been approved.
@@ -134,9 +133,33 @@ If any precondition fails, **stop** and tell the human exactly which one.
 - **Decision breadcrumbs.** If during the implementation you pivoted
   technically, dropped or added scope versus the approved plan, or
   acted on a `code-review` `REQUEST CHANGES` iteration, post a
-  `[decision] <what changed> — <why>.` comment on **both** the issue
-  and the PR (same text on both surfaces) per AGENTS.md →
+  `[decision] <what changed> — <why>.` comment on every surface that exists
+  when the decision is taken — always the issue, and the PR once `auto-pr`
+  opens it (a pre-push decision goes on the issue and is mirrored to the PR
+  when it opens; never demanded before) — per AGENTS.md →
   Decision-breadcrumb convention.
+- **Pre-merge freshness check.** The merge itself is the human's call and
+  happens after `start` returns, but the freshness gate is part of this
+  contract: **immediately before merging**, re-read the PR's current state —
+  do not merge on the read you took at code-review time. An async reviewer (an
+  external bot such as Codex, or a colleague) can land a comment *after*
+  approval but *before* the merge; merging blind misses it.
+
+  ```bash
+  gh pr view <PR> --json reviews,comments,statusCheckRollup   # summaries + issue comments + checks
+  gh api repos/<owner>/<repo>/pulls/<PR>/comments             # inline review-thread comments
+  ```
+
+  Both calls are needed: `gh pr view` does **not** return inline review
+  comments (the line-anchored ones an async bot like Codex posts) — those come
+  only from the `pulls/<PR>/comments` API, so reading just the first leaves the
+  late feedback unseen. (MCP / web session: `get_pull_request_reviews` +
+  `get_pull_request_comments` + `get_pull_request_status`.) If
+  anything landed since the last review, judge it like any other review
+  comment — never auto-apply, decline with a reason when a design decision
+  forbids it — and address it in a new commit before merging, leaving a
+  `[decision]` breadcrumb if it changes the trajectory. Reviewer-agnostic and
+  cheap: two read calls. See AGENTS.md → Pre-merge freshness.
 
 ## Re-run policy
 
@@ -251,13 +274,13 @@ split into smaller pieces.
 
 ### Override: test output in the PR body
 
-The `code-review.md` skill says "Run them locally; paste output in the
+The `code-review` skill says "Run them locally; paste output in the
 PR" — that guidance assumed the PR body was the only durable verification
 trail. In the GitHub-driven flow the `code-review` skill runs at **step 5,
 before the push at step 8**, so no PR exists yet. Test output is in-session
 context during the review step. Therefore:
 
-- Run tests locally as required by `code-review.md`. Non-negotiable.
+- Run tests locally as required by `code-review`. Non-negotiable.
 - In the PR body, summarize the verification in 1-3 lines — e.g.
   `unit + integration green locally; lint + typecheck pass`. Do **not**
   paste raw test output, coverage tables, or terminal dumps into the PR
@@ -280,6 +303,11 @@ produced them.
   state is worth mentioning, describe it in plain language.
 - Meta-commentary about the orchestration process ("as per the analyze
   plan", "skipping code-review for E0", etc.).
+- Agent / tool attribution — `Co-Authored-By: Claude` (or any AI agent)
+  trailers, `🤖 Generated with …` footers, or any mention of Claude,
+  Codex, or the assistant that produced the change. Some tooling appends
+  these automatically; strip them from commit messages, PR titles/bodies,
+  and comments. The deliverable reads as the engineer's own work.
 
 **Does not apply to**:
 - `Closes #N` in PR bodies — this is the standard GitHub convention for
@@ -323,15 +351,14 @@ produced them.
 Apply this section **instead of** the `gh`/sidecar mechanics in the body
 when you are in a web/mobile session without an authenticated `gh`. `git`
 still owns version control; only the GitHub API mechanics differ. The
-*what* of every step is unchanged. (Keep this appendix in sync with the
-body whenever either changes — see
-[#84](https://github.com/dsanchezvalle/workflow-template/issues/84).)
+*what* of every step is unchanged.
 
 ### Tooling contract
 
 - **Resolve tools by capability, not prefix.** The canonical GitHub MCP
   names used here (`get_issue`, `get_issue_comments`, `update_issue`,
-  `list_pull_requests`, `get_pull_request`, `get_pull_request_status`)
+  `list_pull_requests`, `get_pull_request`, `get_pull_request_reviews`,
+  `get_pull_request_comments`, `get_pull_request_status`)
   may be exposed under a server-specific prefix — match by name suffix.
 - **No GitHub MCP server connected → fail loud.** Stop and tell the human:
   connect the GitHub MCP integration, or run this issue in a desktop
@@ -382,6 +409,12 @@ body whenever either changes — see
 - **Post-push: watch CI** via the PR's check results
   (`get_pull_request_status` or the server's check-runs tool — keep check
   names + conclusions only).
+- **Pre-merge freshness** — re-read the PR immediately before merge:
+  `get_pull_request_reviews` (review summaries), `get_pull_request_comments`
+  (the inline review-thread comments — distinct from issue comments and the
+  surface an async bot posts to), and `get_pull_request_status` (checks).
+  Evaluate anything that landed since the last review. Same *what* as the
+  body's *Pre-merge freshness check*; only the read mechanics differ.
 - **Re-run cleanup** — close the open PR with `update_pull_request`
   (state `closed`) or the UI; delete the branch
   (`git branch -D <branch>` + `git push origin --delete <branch>`); swap

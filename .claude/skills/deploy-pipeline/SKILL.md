@@ -1,4 +1,3 @@
-<!-- ADAPTER: claude -->
 ---
 name: deploy-pipeline
 description: Run the pre-deploy checklist for Node 20 + static site (HTML/CSS/JS). Use when the user says "ready to deploy", "deploy checklist", or before merging a release PR to main.
